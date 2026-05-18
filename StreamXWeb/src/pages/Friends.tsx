@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
-import { getFriends, getFriendRequests, sendFriendRequest, acceptFriendRequest, removeFriend, getFriendsListening } from '../services/friendsApi.js'
+import {
+    getFriends,
+    getFriendRequests,
+    sendFriendRequest,
+    acceptFriendRequest,
+    removeFriend,
+    getFriendsListening,
+    getFriendSettings,
+    updateFriendSettings,
+    inviteFriendToJam,
+    type FriendSettings,
+} from '../services/friendsApi.js'
 import './Friends.css'
 
 type FriendItem = {
@@ -29,6 +40,22 @@ export const FriendsPage = () => {
     const [loading, setLoading] = useState(false)
     const [toId, setToId] = useState<string>('')
     const [error, setError] = useState<string | null>(null)
+    const [settings, setSettings] = useState<FriendSettings>({ share_listening: 'friends', allow_jam_invites: true })
+    const [jamInviteId, setJamInviteId] = useState<string>('')
+    const [busyInviteUserId, setBusyInviteUserId] = useState<number | null>(null)
+
+    const refreshAll = async () => {
+        const [friendsRes, requestsRes, listeningRes, settingsRes] = await Promise.all([
+            getFriends().catch(() => ({ friends: [] })),
+            getFriendRequests().catch(() => ({ requests: [] })),
+            getFriendsListening().catch(() => ({ listening: [] })),
+            getFriendSettings().catch(() => ({ settings: { share_listening: 'friends', allow_jam_invites: true } })),
+        ])
+        setFriends((friendsRes.friends || []) as FriendItem[])
+        setRequests((requestsRes.requests || []) as FriendRequestItem[])
+        setListening((listeningRes.listening || []) as ListeningItem[])
+        setSettings((settingsRes.settings || { share_listening: 'friends', allow_jam_invites: true }) as FriendSettings)
+    }
 
     useEffect(() => {
         let mounted = true
@@ -39,12 +66,14 @@ export const FriendsPage = () => {
             getFriends().catch(() => ({ friends: [] })),
             getFriendRequests().catch(() => ({ requests: [] })),
             getFriendsListening().catch(() => ({ listening: [] })),
+            getFriendSettings().catch(() => ({ settings: { share_listening: 'friends', allow_jam_invites: true } })),
         ])
-            .then(([friendsRes, requestsRes, listeningRes]) => {
+            .then(([friendsRes, requestsRes, listeningRes, settingsRes]) => {
                 if (!mounted) return
                 setFriends((friendsRes.friends || []) as FriendItem[])
                 setRequests((requestsRes.requests || []) as FriendRequestItem[])
                 setListening((listeningRes.listening || []) as ListeningItem[])
+                setSettings((settingsRes.settings || { share_listening: 'friends', allow_jam_invites: true }) as FriendSettings)
             })
             .catch(() => {
                 if (!mounted) return
@@ -67,15 +96,39 @@ export const FriendsPage = () => {
 
     const handleAccept = async (userId: number) => {
         await acceptFriendRequest(userId)
-        const [friendsRes, requestsRes] = await Promise.all([getFriends(), getFriendRequests()])
-        setFriends((friendsRes.friends || []) as FriendItem[])
-        setRequests((requestsRes.requests || []) as FriendRequestItem[])
+        await refreshAll()
     }
 
     const handleRemove = async (id: number) => {
         await removeFriend(id)
-        const friendsRes = await getFriends()
-        setFriends((friendsRes.friends || []) as FriendItem[])
+        await refreshAll()
+    }
+
+    const handleSettingsChange = async (next: FriendSettings) => {
+        const merged = { ...settings, ...next }
+        setSettings(merged)
+        try {
+            await updateFriendSettings(next)
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Settings update failed')
+            await refreshAll()
+        }
+    }
+
+    const handleInvite = async (toUserId: number) => {
+        if (!jamInviteId.trim()) {
+            setError('Enter jam id first')
+            return
+        }
+        try {
+            setError(null)
+            setBusyInviteUserId(toUserId)
+            await inviteFriendToJam(toUserId, jamInviteId.trim())
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Jam invite failed')
+        } finally {
+            setBusyInviteUserId(null)
+        }
     }
 
     const submitAddFriend = async () => {
@@ -117,6 +170,44 @@ export const FriendsPage = () => {
                 </section>
 
                 <section className="friends-card">
+                    <h2 className="friends-card-title">Friend Settings</h2>
+                    <div className="friends-settings-grid">
+                        <label className="friends-select-wrap">
+                            <span className="friends-muted">Share listening</span>
+                            <select
+                                className="friends-select"
+                                value={settings.share_listening || 'friends'}
+                                onChange={(e) => handleSettingsChange({ share_listening: e.target.value })}
+                            >
+                                <option value="friends">Friends</option>
+                                <option value="everyone">Everyone</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
+                        </label>
+
+                        <label className="friends-toggle-wrap">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(settings.allow_jam_invites ?? true)}
+                                onChange={(e) => handleSettingsChange({ allow_jam_invites: e.target.checked })}
+                            />
+                            <span className="friends-muted">Allow jam invites</span>
+                        </label>
+                    </div>
+                </section>
+
+                <section className="friends-card">
+                    <h2 className="friends-card-title">Invite to Jam</h2>
+                    <p className="friends-muted">Enter jam id, then tap invite next to friend.</p>
+                    <input
+                        className="friends-input"
+                        value={jamInviteId}
+                        onChange={(e) => setJamInviteId(e.target.value)}
+                        placeholder="jam_xxxxx"
+                    />
+                </section>
+
+                <section className="friends-card">
                     <h2 className="friends-card-title">Requests</h2>
                     {requests.length === 0 ? (
                         <p className="friends-muted">No requests</p>
@@ -144,7 +235,12 @@ export const FriendsPage = () => {
                                         {friend.first_name || friend.username || friend._id}
                                         {friend.presence?.online ? <span className="friends-online"> online</span> : null}
                                     </span>
-                                    <button className="friends-btn friends-btn-danger" onClick={() => handleRemove(friend._id)}>Remove</button>
+                                    <div className="friends-actions">
+                                        <button className="friends-btn" onClick={() => handleInvite(friend._id)} disabled={busyInviteUserId === friend._id}>
+                                            {busyInviteUserId === friend._id ? 'Inviting...' : 'Invite'}
+                                        </button>
+                                        <button className="friends-btn friends-btn-danger" onClick={() => handleRemove(friend._id)}>Remove</button>
+                                    </div>
                                 </li>
                             ))}
                         </ul>

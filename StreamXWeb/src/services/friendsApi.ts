@@ -41,3 +41,20 @@ export async function removeFriend(friendId: number) {
 export async function getFriendsListening() {
     return authFetch('/friends/listening')
 }
+
+export type FriendSettings = {
+    share_listening?: 'friends' | 'everyone' | 'nobody' | string
+    allow_jam_invites?: boolean
+}
+
+export async function getFriendSettings() {
+    return authFetch('/friends/settings') as Promise<{ ok: boolean; settings?: FriendSettings }>
+}
+
+export async function updateFriendSettings(payload: FriendSettings) {
+    return authFetch('/friends/settings', 'PUT', payload)
+}
+
+export async function inviteFriendToJam(toUserId: number, jamId: string) {
+    return authFetch('/friends/invite-jam', 'POST', { toUserId, jamId })
+}

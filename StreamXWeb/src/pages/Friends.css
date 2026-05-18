@@ -78,6 +78,43 @@
     margin-top: 8px;
 }
 
+.friends-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.friends-settings-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.friends-select-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.friends-select {
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border-1);
+    background: var(--surface-0);
+    color: var(--app-fg-strong);
+    padding: 0 12px;
+}
+
+.friends-select:focus {
+    outline: none;
+    border-color: #EF3340;
+}
+
+.friends-toggle-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .friends-input {
     flex: 1;
     min-width: 0;
@@ -103,6 +140,11 @@
     color: rgba(255, 255, 255, 0.98);
     font-weight: 700;
     cursor: pointer;
+}
+
+.friends-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .friends-btn-danger {
