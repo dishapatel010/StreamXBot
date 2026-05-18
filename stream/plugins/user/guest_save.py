@@ -43,6 +43,18 @@ async def _reply(message: Message, text: str):
     await message.reply_text(text)
 
 
+def is_sudo_user(user_id: int) -> bool:
+    try:
+        if int(user_id) == int(getattr(Config, "OWNER_ID", 0)):
+            return True
+
+        sudo_users = getattr(Config, "SUDO_USERS", []) or []
+
+        return int(user_id) in [int(x) for x in sudo_users]
+
+    except Exception:
+        return False
+
 @bot.on_message(filters.command(["guestsave_setchannel", "gs_set"]) & sudo_cmd)
 async def cmd_set_channel(_, message: Message):
     parts = message.text.split()
@@ -81,6 +93,14 @@ async def cmd_status(_, message: Message):
 @bot.on_guest_message()
 async def handle_guest_save(_, message: Message):
     try:
+
+        if not message.from_user:
+            return
+
+        if not is_sudo_user(message.from_user.id):
+            await _reply(message, "You are not allowed to use Guest Save.")
+            return
+
         orig = message.reply_to_message
         if not orig:
             await _reply(message, "Reply to an audio file to save it.")
