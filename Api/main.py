@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from Api.middleware.auth_enforcer import AuthEnforcer
 
 from Api.deps.db import init_db
 from Api.routers.browse import router as browse_router
@@ -55,6 +56,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Accept-Ranges", "Content-Range", "Content-Length"],
 )
+
+# Enforce auth for non-public API routes. Allows login/register/health/assets.
+app.add_middleware(AuthEnforcer)
 
 
 # API routers
