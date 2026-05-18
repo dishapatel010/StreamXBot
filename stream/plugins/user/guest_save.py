@@ -1,6 +1,6 @@
 from typing import Optional, Any, Dict
 from pyrogram import filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineQueryResultArticle, InputTextMessageContent
 
 from stream import bot
 from stream.core.config_manager import Config
@@ -38,6 +38,23 @@ async def _get_settings() -> Dict[str, Any]:
 async def _update_settings(updates: Dict[str, Any]) -> None:
     col = db_handler.get_collection("botsettings").collection
     await col.update_one({"_id": SETTINGS_DOC_ID}, {"$set": updates}, upsert=True)
+
+
+async def _reply(message: Message, text: str):
+    if getattr(message, "guest_query_id", None):
+        try:
+            await bot.answer_guest_query(
+                message.guest_query_id,
+                result=InlineQueryResultArticle(
+                    title="Guest Save",
+                    input_message_content=InputTextMessageContent(text)
+                )
+            )
+            return
+        except Exception as e:
+            LOG.exception("Failed to answer_guest_query: %s", e)
+    # Fallback to standard reply
+    await message.reply_text(text)
 
 
 @bot.on_message(filters.command(["guestsave_setchannel", "gs_set"]))
@@ -108,12 +125,12 @@ async def handle_guest_save(_, message: Message):
     try:
         orig = message.reply_to_message
         if not orig:
-            await message.reply_text("Reply to an audio file to save it.")
+            await _reply(message, "Reply to an audio file to save it.")
             return
 
         # respect protected content
         if getattr(orig, "has_protected_content", False):
-            await message.reply_text("This file cannot be forwarded due to protected content.")
+            await _reply(message, "This file cannot be forwarded due to protected content.")
             return
 
         # accept audio/voice/document with audio mime
@@ -123,7 +140,7 @@ async def handle_guest_save(_, message: Message):
             is_document_audio = True
 
         if not (is_audio or is_document_audio):
-            await message.reply_text("I only save audio files. Reply to an audio file.")
+            await _reply(message, "I only save audio files. Reply to an audio file.")
             return
 
         s = await _get_settings()
@@ -131,15 +148,15 @@ async def handle_guest_save(_, message: Message):
         channel_id = int(s.get("channel_id") or getattr(Config, "DUMP_CHANNEL_ID", 0) or getattr(Config, "CHANNEL_ID", 0))
 
         if not enabled:
-            await message.reply_text("Guest-save is disabled.")
+            await _reply(message, "Guest-save is disabled.")
             return
         if not channel_id:
-            await message.reply_text("No channel configured. Owner can set with /guestsave_setchannel <id>")
+            await _reply(message, "No channel configured. Owner can set with /guestsave_setchannel <id>")
             return
 
         forwarded = await _forward_to_channel(orig, channel_id)
         if not forwarded:
-            await message.reply_text("Failed to save file to archive (check bot permissions).")
+            await _reply(message, "Failed to save file to archive (check bot permissions).")
             return
 
         # store metadata in audio_collection if available
@@ -156,11 +173,11 @@ async def handle_guest_save(_, message: Message):
         except Exception:
             LOG.exception("Failed to insert audio metadata")
 
-        await message.reply_text("Saved to archive. Thanks!")
+        await _reply(message, "Saved to archive. Thanks!")
 
     except Exception:
         LOG.exception("guest_save handler failed")
         try:
-            await message.reply_text("Internal error while saving.")
+            await _reply(message, "Internal error while saving.")
         except Exception:
             pass
