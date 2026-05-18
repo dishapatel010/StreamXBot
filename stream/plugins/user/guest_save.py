@@ -1,4 +1,4 @@
-from typing import Optional, Any, Dict
+from typing import Any, Dict
 from pyrogram import filters
 from pyrogram.types import Message, InlineQueryResultArticle, InputTextMessageContent
 
@@ -6,25 +6,11 @@ from stream import bot
 from stream.core.config_manager import Config
 from stream.database.MongoDb import db_handler
 from stream.helpers.logger import LOGGER
+from stream.helpers.filters import sudo_cmd
 
 LOG = LOGGER(__name__)
 
 SETTINGS_DOC_ID = "guest_save"
-
-
-def _is_admin(user_id: int) -> bool:
-    try:
-        if int(user_id) == int(getattr(Config, "OWNER_ID", 0) or 0):
-            return True
-    except Exception:
-        pass
-    try:
-        s = getattr(Config, "SUDO_USERS", []) or []
-        if isinstance(s, (list, tuple, set)):
-            return int(user_id) in [int(x) for x in s]
-    except Exception:
-        pass
-    return False
 
 
 async def _get_settings() -> Dict[str, Any]:
@@ -57,12 +43,8 @@ async def _reply(message: Message, text: str):
     await message.reply_text(text)
 
 
-@bot.on_message(filters.command(["guestsave_setchannel", "gs_set"]))
+@bot.on_message(filters.command(["guestsave_setchannel", "gs_set"]) & sudo_cmd)
 async def cmd_set_channel(_, message: Message):
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.reply_text("Only owner/sudo can use this command.")
-        return
-
     parts = message.text.split()
     if len(parts) < 2:
         await message.reply_text("Usage: /guestsave_setchannel <channel_id>")
@@ -77,29 +59,20 @@ async def cmd_set_channel(_, message: Message):
     await message.reply_text(f"Guest-save channel set to {cid}")
 
 
-@bot.on_message(filters.command(["guestsave_enable", "gs_enable"]))
+@bot.on_message(filters.command(["guestsave_enable", "gs_enable"]) & sudo_cmd)
 async def cmd_enable(_, message: Message):
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.reply_text("Only owner/sudo can use this command.")
-        return
     await _update_settings({"enabled": True})
     await message.reply_text("Guest-save enabled")
 
 
-@bot.on_message(filters.command(["guestsave_disable", "gs_disable"]))
+@bot.on_message(filters.command(["guestsave_disable", "gs_disable"]) & sudo_cmd)
 async def cmd_disable(_, message: Message):
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.reply_text("Only owner/sudo can use this command.")
-        return
     await _update_settings({"enabled": False})
     await message.reply_text("Guest-save disabled")
 
 
-@bot.on_message(filters.command(["guestsave_status", "gs_status"]))
+@bot.on_message(filters.command(["guestsave_status", "gs_status"]) & sudo_cmd)
 async def cmd_status(_, message: Message):
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.reply_text("Only owner/sudo can use this command.")
-        return
     s = await _get_settings()
     await message.reply_text(f"Guest-save settings:\n{str(s)}")
 
@@ -108,21 +81,18 @@ async def cmd_status(_, message: Message):
 @bot.on_guest_message()
 async def handle_guest_save(_, message: Message):
     try:
-        # THIS is the actual replied media message
         orig = message.reply_to_message
-
         if not orig:
             await _reply(message, "Reply to an audio file to save it.")
             return
 
-        # protected content check
+        # Protected content check
         if getattr(orig, "has_protected_content", False):
             await _reply(message, "This file cannot be saved due to protected content.")
             return
 
-        # Correct media checks
+        # Media checks
         is_audio = bool(orig.audio or orig.voice)
-
         is_document_audio = (
             bool(orig.document)
             and bool(getattr(orig.document, "mime_type", ""))
@@ -134,9 +104,7 @@ async def handle_guest_save(_, message: Message):
             return
 
         s = await _get_settings()
-
         enabled = bool(s.get("enabled", True))
-
         channel_id = int(
             s.get("channel_id")
             or getattr(Config, "DUMP_CHANNEL_ID", 0)
@@ -148,47 +116,35 @@ async def handle_guest_save(_, message: Message):
             return
 
         if not channel_id:
-            await _reply(
-                message,
-                "No channel configured. Use /guestsave_setchannel <id>"
-            )
+            await _reply(message, "No channel configured. Use /guestsave_setchannel <id>")
             return
 
-        # DIRECT SEND USING FILE_ID
+        # Direct send using file_id
         try:
-
             if orig.audio:
                 sent = await bot.send_audio(
                     chat_id=channel_id,
                     audio=orig.audio.file_id,
                     caption=orig.caption or ""
                 )
-
             elif orig.voice:
                 sent = await bot.send_voice(
                     chat_id=channel_id,
                     voice=orig.voice.file_id,
                     caption=orig.caption or ""
                 )
-
             elif orig.document:
                 sent = await bot.send_document(
                     chat_id=channel_id,
                     document=orig.document.file_id,
                     caption=orig.caption or ""
                 )
-
             else:
                 await _reply(message, "Unsupported media type.")
                 return
-
         except Exception as e:
             LOG.error("Failed to send media: %s", e)
-
-            await _reply(
-                message,
-                f"Failed to save file.\n\nError:\n{str(e)}"
-            )
+            await _reply(message, f"Failed to save file.\n\nError:\n{str(e)}")
             return
 
         # Trigger same indexing as when a new audio is added in channel_id
@@ -202,11 +158,7 @@ async def handle_guest_save(_, message: Message):
 
     except Exception as e:
         LOG.exception("guest_save handler failed")
-
         try:
-            await _reply(
-                message,
-                f"Internal error:\n{str(e)}"
-            )
+            await _reply(message, f"Internal error:\n{str(e)}")
         except Exception:
             pass
