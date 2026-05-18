@@ -108,7 +108,7 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
     errs = []
     # 1. Try to forward first (preserves original author/message metadata)
     try:
-        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.reply_to_message_id.chat.id, message_ids=orig.reply_to_message.id)
+        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.reply_to_message.chat.id, message_ids=orig.reply_to_message.id)
         if isinstance(forwarded, list):
             return (forwarded[0] if forwarded else None), None
         return forwarded, None
@@ -118,7 +118,7 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
 
     # 2. Try copy_message (copies the message without forward header)
     try:
-        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.reply_to_message_id.chat.id, message_id=orig.reply_to_message.id)
+        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.reply_to_message.chat.id, message_id=orig.reply_to_message.id)
         return copied, None
     except Exception as e:
         errs.append(f"Copy failed: {e}")
