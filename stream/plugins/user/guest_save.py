@@ -105,6 +105,7 @@ async def cmd_status(_, message: Message):
 
 
 async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[Message], Optional[str]]:
+    LOG.info("Received guest message: %s", orig)
     errs = []
     # 1. Try to forward first (preserves original author/message metadata)
     try:
@@ -158,7 +159,6 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
 
 @bot.on_guest_message()
 async def handle_guest_save(_, message: Message):
-    LOG.info("Received guest message: %s", message)
     try:
         orig = message.reply_to_message
         if not orig:
