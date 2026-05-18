@@ -91,7 +91,7 @@ async def run_chat_index_background(
                         track_ids.append(track_id)
                         
                         # Check if already fully enriched in the database
-                        doc = await db_handler.audio_collection.find_one({"_id": track_id})
+                        doc = await db_handler.audio_collection.collection.find_one({"_id": track_id})
                         is_enriched = doc and doc.get("lyrics") is not None
                         
                         if is_enriched:
