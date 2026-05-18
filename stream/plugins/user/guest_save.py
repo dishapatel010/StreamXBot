@@ -90,13 +90,13 @@ async def cmd_status(_, message: Message):
 async def _forward_to_channel(orig: Message, channel_id: int) -> Optional[Message]:
     try:
         # prefer forward to preserve original author; fallback to copy
-        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.chat.id, message_ids=orig.message.id)
+        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.chat.id, message_ids=orig.id)
         if isinstance(forwarded, list):
             return forwarded[0] if forwarded else None
         return forwarded
     except Exception:
         try:
-            copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.message.id)
+            copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.id)
             return copied
         except Exception as e:
             LOG.exception("Failed to forward/copy: %s", e)
@@ -147,9 +147,9 @@ async def handle_guest_save(_, message: Message):
             audio_col = db_handler.audio_collection.collection
             doc = {
                 "source_chat_id": int(orig.chat.id),
-                "source_message_id": int(orig.message_id),
+                "source_message_id": int(orig.id),
                 "saved_chat_id": int(forwarded.chat.id),
-                "saved_message_id": int(forwarded.message_id),
+                "saved_message_id": int(forwarded.id),
                 "created_at": __import__('time').time(),
             }
             await audio_col.insert_one(doc)
