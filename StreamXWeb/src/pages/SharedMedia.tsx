@@ -4,7 +4,7 @@ import { SongList } from '../components/SongList.js'
 import { WebSongList } from '../components/WebSongList.js'
 import { usePlayerPlayback } from '../context/PlayerContext.js'
 import { api, getWebSongListEnabled } from '../services/api.js'
-import { buildSharedAlbumLink, buildSharedTrackLink, canOpenStreamXApp, getRuntimeApiBaseUrl, isAutoOpenLink, openStreamXTarget } from '../deepLinks.js'
+import { buildJamLink, buildSharedAlbumLink, buildSharedTrackLink, canOpenStreamXApp, getRuntimeApiBaseUrl, isAutoOpenLink, openStreamXTarget } from '../deepLinks.js'
 import { platform } from '../platform.js'
 import type { PlaylistTrack, SharedAlbumResponse, Song, TrackDetailsResponse } from '../types/index.js'
 import emptyPlaylistUrl from '../assets/mptyPlaylist.svg'
@@ -504,5 +504,75 @@ export const SharedTrackPage = () => {
       onCopyLink={handleCopyLink}
       onOpenInApp={handleOpenInApp}
     />
+  )
+}
+
+export const SharedJamPage = () => {
+  const { jamId } = useParams<{ jamId: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const runtimeApiBaseUrl = useMemo(() => getRuntimeApiBaseUrl(location.search), [location.search])
+  const autoLaunchAttemptedRef = useRef(false)
+  const showOpenInApp = canOpenStreamXApp()
+
+  const shareLink = useMemo(() => (jamId ? buildJamLink(jamId, runtimeApiBaseUrl) : ''), [jamId, runtimeApiBaseUrl])
+
+  useEffect(() => {
+    if (!jamId || !showOpenInApp || !isAutoOpenLink(location.search)) return
+    if (autoLaunchAttemptedRef.current) return
+    autoLaunchAttemptedRef.current = true
+    openStreamXTarget(
+      { kind: 'jam', id: jamId },
+      { apiBaseUrl: runtimeApiBaseUrl, fallbackUrl: window.location.href },
+    )
+  }, [jamId, location.search, runtimeApiBaseUrl, showOpenInApp])
+
+  const goBack = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1)
+    } else {
+      navigate('/', { replace: true })
+    }
+  }, [navigate])
+
+  const handleCopyLink = useCallback(() => {
+    if (!shareLink) return
+    copyText(shareLink).then((ok) => {
+      if (!ok) alert('Failed to copy link')
+    })
+  }, [shareLink])
+
+  const handleOpenInApp = useCallback(() => {
+    if (!jamId) return
+    openStreamXTarget(
+      { kind: 'jam', id: jamId },
+      { apiBaseUrl: runtimeApiBaseUrl, fallbackUrl: window.location.href },
+    )
+  }, [jamId, runtimeApiBaseUrl])
+
+  if (!jamId) return null
+
+  return (
+    <div className="audio-page latest-songs-page favorites-page playlist-page available-playlist-page">
+      <main className="content">
+        <div className="favorites-header">
+          <div className="favorites-info">
+            <h1 className="favorites-title">Jam Invite</h1>
+            <div className="favorites-subtitle">{jamId}</div>
+            {showOpenInApp ? (
+              <button className="favorites-preview-btn favorites-preview-btn--add" type="button" onClick={handleOpenInApp}>
+                Open App
+              </button>
+            ) : null}
+            <button className="favorites-preview-btn" type="button" onClick={handleCopyLink}>
+              Copy Link
+            </button>
+            <button className="favorites-preview-btn" type="button" onClick={goBack}>
+              Back
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
   )
 }

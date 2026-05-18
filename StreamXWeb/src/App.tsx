@@ -16,6 +16,7 @@ import { JamPage } from './pages/JamPage.js'
 import { FriendsPage } from './pages/Friends.js'
 import { ProfilePage } from './pages/ProfilePage.js'
 import { SearchPage } from './pages/Search.js'
+import { SharedJamPage } from './pages/SharedMedia.js'
 import { platform } from './platform.js'
 import { API_BASE_URL, ensureAuthCookieFromToken, getAuthToken, getRedSelectorEnabled, getThemeMode, getFloatingNavTopPad, setAuthToken } from './services/api.js'
 import './App.css'
@@ -69,6 +70,8 @@ const AnimatedRoutes = () => {
         <Route path="/friends" element={<RouteMotion><FriendsPage /></RouteMotion>} />
         <Route path="/profile" element={<RouteMotion><ProfilePage /></RouteMotion>} />
         <Route path="/search" element={<RouteMotion><SearchPage /></RouteMotion>} />
+        <Route path="/share/jam/:jamId" element={<RouteMotion><SharedJamPage /></RouteMotion>} />
+        <Route path="/join-jam/:jamId" element={<RouteMotion><SharedJamPage /></RouteMotion>} />
       </Routes>
     </AnimatePresence>
   )
