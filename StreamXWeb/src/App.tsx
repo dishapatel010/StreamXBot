@@ -13,6 +13,7 @@ import { RandomMixPage } from './pages/RandomMix.js'
 import { FavoritesPage } from './pages/Favorites.js'
 import { LoginPage } from './pages/Login.js'
 import { JamPage } from './pages/JamPage.js'
+import { FriendsPage } from './pages/Friends.js'
 import { ProfilePage } from './pages/ProfilePage.js'
 import { SearchPage } from './pages/Search.js'
 import { platform } from './platform.js'
@@ -65,6 +66,7 @@ const AnimatedRoutes = () => {
         <Route path="/favorites" element={<RouteMotion><FavoritesPage /></RouteMotion>} />
         <Route path="/login" element={<RouteMotion><LoginPage /></RouteMotion>} />
         <Route path="/jam/:jamId" element={<RouteMotion><JamPage /></RouteMotion>} />
+        <Route path="/friends" element={<RouteMotion><FriendsPage /></RouteMotion>} />
         <Route path="/profile" element={<RouteMotion><ProfilePage /></RouteMotion>} />
         <Route path="/search" element={<RouteMotion><SearchPage /></RouteMotion>} />
       </Routes>
@@ -83,7 +85,7 @@ function App() {
   useEffect(() => {
     const token = getAuthToken()
     if (!token) return
-    ensureAuthCookieFromToken(token).catch(() => {})
+    ensureAuthCookieFromToken(token).catch(() => { })
   }, [])
 
   useEffect(() => {
@@ -153,7 +155,7 @@ function App() {
         if (!res.ok) throw new Error(`verify failed: ${res.status}`)
         const json = (await res.json()) as { first_name?: string; token?: string }
         if (!cancelled) setTgUserFirstName(json.first_name ?? null)
-        
+
         // Store the auth token if present
         if (json.token) {
           setAuthToken(json.token)

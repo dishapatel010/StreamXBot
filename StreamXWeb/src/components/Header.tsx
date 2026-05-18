@@ -41,8 +41,8 @@ export const Header = memo(({ userFirstName }: { userFirstName?: string | null }
     if (authUserInfo?.first_name) return authUserInfo.first_name
     return null
   }, [userFirstName, authUserInfo])
-  
-  const displayName = useMemo(() => 
+
+  const displayName = useMemo(() =>
     effectiveUserName ? (effectiveUserName.length > 7 ? `${effectiveUserName.slice(0, 7)}…` : effectiveUserName) : '...',
     [effectiveUserName]
   )
@@ -114,6 +114,11 @@ export const Header = memo(({ userFirstName }: { userFirstName?: string | null }
 
   const handleSettingsClick = useCallback(() => {
     navigate('/settings')
+    setIsMenuOpen(false)
+  }, [navigate])
+
+  const handleFriendsClick = useCallback(() => {
+    navigate('/friends')
     setIsMenuOpen(false)
   }, [navigate])
 
@@ -257,6 +262,12 @@ export const Header = memo(({ userFirstName }: { userFirstName?: string | null }
                 </svg>
                 <span>Profile</span>
               </button>
+              <button className="profile-menu-item profile-menu-item--floating" type="button" role="menuitem" onClick={handleFriendsClick}>
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                  <path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V20h14v-3.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05C15.16 13.35 16 14.64 16 16.5V20h6v-3.5c0-2.33-4.67-3.5-7-3.5z" />
+                </svg>
+                <span>Friends</span>
+              </button>
               <button className="profile-menu-item profile-menu-item--floating" type="button" role="menuitem" onClick={handleAudioClick}>
                 <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
                   <path fill="currentColor" d="M12 3a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-1 3a1 1 0 0 1 2 0v7a1 1 0 0 1-2 0V6Zm-4 6a1 1 0 0 1 1 1a4 4 0 0 0 8 0a1 1 0 1 1 2 0a6 6 0 0 1-5 5.91V21a1 1 0 1 1-2 0v-2.09A6 6 0 0 1 6 13a1 1 0 0 1 1-1Z" />
@@ -280,7 +291,7 @@ export const Header = memo(({ userFirstName }: { userFirstName?: string | null }
               {hasAuthToken && !isTelegram && (
                 <button className="profile-menu-item profile-menu-item--floating" type="button" role="menuitem" onClick={handleSignOutClick}>
                   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-                    <path fill="currentColor" d="M5 21q-.825 0-1.413-.587Q3 19.825 3 19V5q0-.825.587-1.413Q4.175 3 5 3h7v2H5v14h7v2Zm11-4l-1.375-1.45l2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5Z"/>
+                    <path fill="currentColor" d="M5 21q-.825 0-1.413-.587Q3 19.825 3 19V5q0-.825.587-1.413Q4.175 3 5 3h7v2H5v14h7v2Zm11-4l-1.375-1.45l2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5Z" />
                   </svg>
                   <span>Sign Out</span>
                 </button>
@@ -326,6 +337,9 @@ export const Header = memo(({ userFirstName }: { userFirstName?: string | null }
             </div>
             <button className="profile-menu-item" type="button" role="menuitem" onClick={handleProfileClick}>
               Profile
+            </button>
+            <button className="profile-menu-item" type="button" role="menuitem" onClick={handleFriendsClick}>
+              Friends
             </button>
             <button className="profile-menu-item" type="button" role="menuitem" onClick={handleAudioClick}>
               Audio
