@@ -104,120 +104,127 @@ async def cmd_status(_, message: Message):
     await message.reply_text(f"Guest-save settings:\n{str(s)}")
 
 
-async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[Message], Optional[str]]:
-    LOG.info("Received guest message: %s", orig)
-    errs = []
-    # 1. Try to forward first (preserves original author/message metadata)
-    try:
-        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.reply_to_message.chat.id, message_ids=orig.reply_to_message.id)
-        if isinstance(forwarded, list):
-            return (forwarded[0] if forwarded else None), None
-        return forwarded, None
-    except Exception as e:
-        errs.append(f"Forward failed: {e}")
-        LOG.info("Step 1 (Forward) failed: %s", e)
-
-    # 2. Try copy_message (copies the message without forward header)
-    try:
-        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.reply_to_message.chat.id, message_id=orig.reply_to_message.id)
-        return copied, None
-    except Exception as e:
-        errs.append(f"Copy failed: {e}")
-        LOG.info("Step 2 (Copy) failed: %s", e)
-
-    # 3. Fallback: Send by file_id if we have the media file_id (crucial for Guest Mode!)
-    try:
-        LOG.info("Attempting Step 3 (Send by file_id) to channel %s...", channel_id)
-        if orig.reply_to_message.audio:
-            res = await bot.send_audio(
-                chat_id=channel_id,
-                audio=orig.reply_to_message.audio.file_id,
-            )
-            LOG.info("Step 3 (Send Audio by file_id) succeeded!")
-            return res, None
-        elif orig.reply_to_message.voice:
-            res = await bot.send_voice(
-                chat_id=channel_id,
-                voice=orig.reply_to_message.voice.file_id
-            )
-            LOG.info("Step 3 (Send Voice by file_id) succeeded!")
-            return res, None
-        elif orig.reply_to_message.document:
-            res = await bot.send_document(
-                chat_id=channel_id,
-                document=orig.reply_to_message.document.file_id
-            )
-            LOG.info("Step 3 (Send Document by file_id) succeeded!")
-            return res, None
-    except Exception as e:
-        errs.append(f"Send by file_id failed: {e}")
-        LOG.info("Step 3 (Send by file_id) failed: %s", e)
-    
-    return None, "; ".join(errs)
-
-
 
 @bot.on_guest_message()
 async def handle_guest_save(_, message: Message):
     try:
+        # THIS is the actual replied media message
         orig = message.reply_to_message
+
         if not orig:
             await _reply(message, "Reply to an audio file to save it.")
             return
 
-        # respect protected content
+        # protected content check
         if getattr(orig, "has_protected_content", False):
-            await _reply(message, "This file cannot be forwarded due to protected content.")
+            await _reply(message, "This file cannot be saved due to protected content.")
             return
 
-        # accept audio/voice/document with audio mime
-        is_audio = bool(orig.reply_to_message.audio or orig.reply_to_message.voice)
-        is_document_audio = False
-        if orig.reply_to_message.document and getattr(orig.reply_to_message.document, "mime_type", "") and orig.reply_to_message.document.mime_type.startswith("audio/"):
-            is_document_audio = True
+        # Correct media checks
+        is_audio = bool(orig.audio or orig.voice)
+
+        is_document_audio = (
+            bool(orig.document)
+            and bool(getattr(orig.document, "mime_type", ""))
+            and orig.document.mime_type.startswith("audio/")
+        )
 
         if not (is_audio or is_document_audio):
-            await _reply(message, "I only save audio files. Reply to an audio file.")
+            await _reply(message, "I only save audio files.")
             return
 
         s = await _get_settings()
+
         enabled = bool(s.get("enabled", True))
-        channel_id = int(s.get("channel_id") or getattr(Config, "DUMP_CHANNEL_ID", 0) or getattr(Config, "CHANNEL_ID", 0))
+
+        channel_id = int(
+            s.get("channel_id")
+            or getattr(Config, "DUMP_CHANNEL_ID", 0)
+            or getattr(Config, "CHANNEL_ID", 0)
+        )
 
         if not enabled:
             await _reply(message, "Guest-save is disabled.")
             return
+
         if not channel_id:
-            await _reply(message, "No channel configured. Owner can set with /guestsave_setchannel <id>")
+            await _reply(
+                message,
+                "No channel configured. Use /guestsave_setchannel <id>"
+            )
             return
 
-        forwarded, err_msg = await _forward_to_channel(orig, channel_id)
-        if not forwarded:
-            error_text = "Failed to save file to archive (check bot permissions)."
-            if err_msg:
-                error_text += f"\nDetails: {err_msg}"
-            await _reply(message, error_text)
+        # DIRECT SEND USING FILE_ID
+        try:
+
+            if orig.audio:
+                sent = await bot.send_audio(
+                    chat_id=channel_id,
+                    audio=orig.audio.file_id,
+                    caption=orig.caption or ""
+                )
+
+            elif orig.voice:
+                sent = await bot.send_voice(
+                    chat_id=channel_id,
+                    voice=orig.voice.file_id,
+                    caption=orig.caption or ""
+                )
+
+            elif orig.document:
+                sent = await bot.send_document(
+                    chat_id=channel_id,
+                    document=orig.document.file_id,
+                    caption=orig.caption or ""
+                )
+
+            else:
+                await _reply(message, "Unsupported media type.")
+                return
+
+        except Exception as e:
+            LOG.error("Failed to send media: %s", e)
+
+            await _reply(
+                message,
+                f"Failed to save file.\n\nError:\n{str(e)}"
+            )
             return
 
-        # store metadata in audio_collection if available
+        # Save metadata
         try:
             audio_col = db_handler.audio_collection.collection
+
             doc = {
-                "source_chat_id": int(orig.reply_to_message.chat.id),
-                "source_message_id": int(orig.reply_to_message.id),
-                "saved_chat_id": int(forwarded.chat.id),
-                "saved_message_id": int(forwarded.id),
-                "created_at": __import__('time').time(),
+                "guest_message_id": int(message.id),
+                "source_chat_id": int(orig.chat.id),
+                "source_message_id": int(orig.id),
+                "saved_chat_id": int(sent.chat.id),
+                "saved_message_id": int(sent.id),
+                "file_id": (
+                    orig.audio.file_id
+                    if orig.audio
+                    else orig.voice.file_id
+                    if orig.voice
+                    else orig.document.file_id
+                ),
+                "created_at": __import__("time").time(),
             }
+
             await audio_col.insert_one(doc)
-        except Exception:
-            LOG.info("Failed to insert audio metadata")
 
-        await _reply(message, "Saved to archive. Thanks!")
+        except Exception as e:
+            LOG.error("DB insert failed: %s", e)
 
-    except Exception:
-        LOG.info("guest_save handler failed")
+        await _reply(message, "Saved to archive successfully!")
+
+    except Exception as e:
+        LOG.exception("guest_save handler failed")
+
         try:
-            await _reply(message, "Internal error while saving.")
+            await _reply(
+                message,
+                f"Internal error:\n{str(e)}"
+            )
         except Exception:
             pass
