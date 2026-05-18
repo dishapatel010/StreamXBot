@@ -8,8 +8,8 @@ class AuthEnforcer(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path or ""
 
-        # allow simple public assets, health, and auth endpoints needed for login/registration
-        allowed_exact = {
+        # allow unauthenticated access to login/register and assets only
+        unauthenticated_allowed = {
             "/",
             "/health",
             "/favicon.ico",
@@ -19,15 +19,16 @@ class AuthEnforcer(BaseHTTPMiddleware):
             "/auth/validate",
             "/auth/cookie",
         }
-        allowed_prefixes = ("/assets", "/static")
+        unauthenticated_prefixes = ("/assets", "/static")
 
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        if path in allowed_exact or any(path.startswith(p) for p in allowed_prefixes):
+        # if route is public for unauthenticated, allow
+        if path in unauthenticated_allowed or any(path.startswith(p) for p in unauthenticated_prefixes):
             return await call_next(request)
 
-        # require auth token for every other API route
+        # for all other routes, require valid auth token. app calls all endpoints with token.
         token = ""
         auth_header = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
         if auth_header.lower().startswith("bearer "):
@@ -38,6 +39,10 @@ class AuthEnforcer(BaseHTTPMiddleware):
             token = (request.cookies.get("auth_token") or "").strip()
             if not token:
                 token = (request.cookies.get("token") or "").strip()
+            if not token:
+                token = (request.query_params.get("token") or "").strip()
+            if not token:
+                token = (request.query_params.get("auth") or "").strip()
 
         if not token:
             return JSONResponse({"detail": "auth required"}, status_code=401)
@@ -47,4 +52,5 @@ class AuthEnforcer(BaseHTTPMiddleware):
         except Exception:
             return JSONResponse({"detail": "invalid auth token"}, status_code=401)
 
+        # token valid, allow all app routes. endpoint handlers enforce their own auth rules.
         return await call_next(request)
