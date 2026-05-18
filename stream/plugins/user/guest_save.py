@@ -191,6 +191,13 @@ async def handle_guest_save(_, message: Message):
             )
             return
 
+        # Trigger same indexing as when a new audio is added in channel_id
+        try:
+            from stream.plugins.db.audioIndex import channel_audio_filter
+            await channel_audio_filter(bot, sent)
+        except Exception as e:
+            LOG.error("Failed to index guest-saved file: %s", e)
+
         await _reply(message, "Saved to archive successfully!")
 
     except Exception as e:
