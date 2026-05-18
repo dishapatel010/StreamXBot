@@ -6,7 +6,7 @@ from stream import bot
 from stream.core.config_manager import Config
 from stream.database.MongoDb import db_handler
 from stream.helpers.logger import LOGGER
-from stream.helpers.filters import sudo_cmd
+from stream.helpers.filters import sudo_cmd, is_owner, is_sudo
 
 LOG = LOGGER(__name__)
 
@@ -45,13 +45,7 @@ async def _reply(message: Message, text: str):
 
 def is_sudo_user(user_id: int) -> bool:
     try:
-        if int(user_id) == int(getattr(Config, "OWNER_ID", 0)):
-            return True
-
-        sudo_users = getattr(Config, "SUDO_USERS", []) or []
-
-        return int(user_id) in [int(x) for x in sudo_users]
-
+        return is_owner(user_id) or is_sudo(user_id)
     except Exception:
         return False
 

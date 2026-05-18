@@ -185,6 +185,10 @@ async def pull_updates(msg=None):
         return None
 
 async def update(_, message: Message):
+    user_id = message.from_user.id if message.from_user else None
+    if not user_id or not await _has_config_access(user_id):
+        await message.reply_text("Access denied.", quote=True)
+        return
     msg = await message.reply_text("Checking for updates...", quote=True)
     info = await check_for_updates()
     if not info or not info.get("updates_available"):

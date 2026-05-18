@@ -270,7 +270,7 @@ class Config:
 
     @classmethod
     def _process_value(cls, key, value):
-        if key in {"OWNER_ID", "SOURCE_CHANNEL_IDS"}:
+        if key in {"OWNER_ID", "SOURCE_CHANNEL_IDS", "SUDO_USERS", "PREMIUM_USERS"}:
             return cls._parse_id_list(value)
         if key == "MULTI_CLIENT_TOKENS":
             return cls._parse_str_list(value)
