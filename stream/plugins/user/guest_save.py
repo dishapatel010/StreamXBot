@@ -105,23 +105,52 @@ async def cmd_status(_, message: Message):
 
 
 async def _forward_to_channel(orig: Message, channel_id: int) -> Optional[Message]:
+    # 1. Try to forward first (preserves original author/message metadata)
     try:
-        # prefer forward to preserve original author; fallback to copy
         forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.chat.id, message_ids=orig.id)
         if isinstance(forwarded, list):
             return forwarded[0] if forwarded else None
         return forwarded
-    except Exception:
-        try:
-            copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.id)
-            return copied
-        except Exception as e:
-            LOG.exception("Failed to forward/copy: %s", e)
-            return None
+    except Exception as e:
+        LOG.debug("Forward failed, trying copy: %s", e)
+
+    # 2. Try copy_message (copies the message without forward header)
+    try:
+        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.id)
+        return copied
+    except Exception as e:
+        LOG.debug("Copy failed, trying to send by file_id: %s", e)
+
+    # 3. Fallback: Send by file_id if we have the media file_id (crucial for Guest Mode!)
+    try:
+        if orig.audio:
+            return await bot.send_audio(
+                chat_id=channel_id,
+                audio=orig.audio.file_id,
+                caption=orig.caption
+            )
+        elif orig.voice:
+            return await bot.send_voice(
+                chat_id=channel_id,
+                voice=orig.voice.file_id,
+                caption=orig.caption
+            )
+        elif orig.document:
+            return await bot.send_document(
+                chat_id=channel_id,
+                document=orig.document.file_id,
+                caption=orig.caption
+            )
+    except Exception as e:
+        LOG.exception("Failed to send by file_id: %s", e)
+    
+    return None
+
 
 
 @bot.on_guest_message()
 async def handle_guest_save(_, message: Message):
+    LOG.info("Received guest message: %s", message)
     try:
         orig = message.reply_to_message
         if not orig:
