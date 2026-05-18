@@ -75,6 +75,7 @@ async def run_chat_index_background(
         track_ids = []
         scanned = 0
         found = 0
+        consecutive_already_indexed = 0
         
         last_update_time = time.time()
         
@@ -89,10 +90,23 @@ async def run_chat_index_background(
                         track_id = await _upsert_minimal(msg, media)
                         track_ids.append(track_id)
                         
-                        # 2. Enrich under the strict concurrency semaphore
-                        asyncio.create_task(safe_enrich_task(msg, media))
+                        # Check if already fully enriched in the database
+                        doc = await db_handler.audio_collection.find_one({"_id": track_id})
+                        is_enriched = doc and doc.get("lyrics") is not None
+                        
+                        if is_enriched:
+                            consecutive_already_indexed += 1
+                        else:
+                            consecutive_already_indexed = 0
+                            # 2. Enrich under the strict concurrency semaphore only if not yet enriched
+                            asyncio.create_task(safe_enrich_task(msg, media))
                     except Exception as e:
                         LOG.error(f"Failed to index msg {msg.id} in {chat_id}: {e}")
+            
+            # If we find 30 consecutive already-indexed tracks, we stop scanning history!
+            if consecutive_already_indexed >= 30:
+                LOG.info(f"Reached already indexed tracks boundary in chat {chat_id}. Stopping scan early.")
+                break
             
             # Micro-sleep to prevent userbot FloodWait on Telegram API
             await asyncio.sleep(0.01)

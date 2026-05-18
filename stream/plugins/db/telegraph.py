@@ -20,10 +20,10 @@ _TELEGRAPH_HELPER = None
 _TELEGRAPH_INIT_LOCK = asyncio.Lock()
 
 class TelegraphHelper:
-    def __init__(self, author_name=None, author_url=None):
+    def __init__(self, author_name=None, author_url=None, access_token=None):
         if Telegraph is None:
             raise RuntimeError("telegraph package not installed")
-        self._telegraph = Telegraph(domain="graph.org")
+        self._telegraph = Telegraph(access_token=access_token, domain="graph.org")
         self._author_name = author_name
         self._author_url = author_url
 
@@ -36,10 +36,43 @@ class TelegraphHelper:
                 author_url=self._author_url,
             )
             LOG.info("Telegraph account created")
+            # Save the new token to database settings
+            try:
+                from stream.database.MongoDb import db_handler
+                col = db_handler.get_collection("botsettings").collection
+                await col.update_one(
+                    {"_id": "telegraph_creds"},
+                    {"$set": {"access_token": self._telegraph.access_token, "updated_at": time.time()}},
+                    upsert=True
+                )
+                LOG.info("Saved new Telegraph access token to database")
+            except Exception as ex:
+                LOG.error(f"Failed to save Telegraph token to db: {ex}")
             return out
         except Exception as e:
             LOG.error(f"Failed to create Telegraph Account: {e}", exc_info=True)
             raise
+
+
+async def get_telegraph_helper(author_name=None, author_url=None):
+    from stream.database.MongoDb import db_handler
+    
+    col = db_handler.get_collection("botsettings").collection
+    doc = await col.find_one({"_id": "telegraph_creds"})
+    token = doc.get("access_token") if doc else None
+    
+    if token:
+        try:
+            helper = TelegraphHelper(author_name=author_name, author_url=author_url, access_token=token)
+            await helper._telegraph.get_account_info()
+            LOG.info("Reusing existing Telegraph account from database settings")
+            return helper
+        except Exception as e:
+            LOG.warning(f"Saved Telegraph token was invalid or expired: {e}. Creating a new one...")
+            
+    helper = TelegraphHelper(author_name=author_name, author_url=author_url)
+    await helper.create_account()
+    return helper
 
     async def create_page(self, title, content):
         try:
@@ -173,10 +206,8 @@ async def publish_track_lyrics_to_graph(
     async with _TELEGRAPH_INIT_LOCK:
         if _TELEGRAPH_HELPER is None:
             author_url = getattr(Config, "AUTHOR_URL", None)
-            helper = TelegraphHelper(author_name=artist, author_url=author_url)
             LOG.info(f"Telegraph init start author_url={author_url!r}")
-            await helper.create_account()
-            _TELEGRAPH_HELPER = helper
+            _TELEGRAPH_HELPER = await get_telegraph_helper(author_name=artist, author_url=author_url)
             LOG.info("Telegraph init done")
 
     try:
@@ -253,9 +284,7 @@ async def publish_lyrics_text_to_graph(
     async with _TELEGRAPH_INIT_LOCK:
         if _TELEGRAPH_HELPER is None:
             author_url = getattr(Config, "AUTHOR_URL", None)
-            helper = TelegraphHelper(author_name=artist, author_url=author_url)
-            await helper.create_account()
-            _TELEGRAPH_HELPER = helper
+            _TELEGRAPH_HELPER = await get_telegraph_helper(author_name=artist, author_url=author_url)
 
     try:
         _TELEGRAPH_HELPER._author_name = artist
