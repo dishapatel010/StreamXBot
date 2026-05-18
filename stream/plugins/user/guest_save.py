@@ -52,7 +52,7 @@ async def _reply(message: Message, text: str):
             )
             return
         except Exception as e:
-            LOG.exception("Failed to answer_guest_query: %s", e)
+            LOG.info("Failed to answer_guest_query: %s", e)
     # Fallback to standard reply
     await message.reply_text(text)
 
@@ -114,7 +114,7 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
         return forwarded, None
     except Exception as e:
         errs.append(f"Forward failed: {e}")
-        LOG.debug("Forward failed, trying copy: %s", e)
+        LOG.info("Forward failed, trying copy: %s", e)
 
     # 2. Try copy_message (copies the message without forward header)
     try:
@@ -122,7 +122,7 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
         return copied, None
     except Exception as e:
         errs.append(f"Copy failed: {e}")
-        LOG.debug("Copy failed, trying to send by file_id: %s", e)
+        LOG.info("Copy failed, trying to send by file_id: %s", e)
 
     # 3. Fallback: Send by file_id if we have the media file_id (crucial for Guest Mode!)
     try:
@@ -149,7 +149,7 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
             return res, None
     except Exception as e:
         errs.append(f"Send by file_id failed: {e}")
-        LOG.exception("Failed to send by file_id: %s", e)
+        LOG.info("Failed to send by file_id: %s", e)
     
     return None, "; ".join(errs)
 
@@ -211,12 +211,12 @@ async def handle_guest_save(_, message: Message):
             }
             await audio_col.insert_one(doc)
         except Exception:
-            LOG.exception("Failed to insert audio metadata")
+            LOG.info("Failed to insert audio metadata")
 
         await _reply(message, "Saved to archive. Thanks!")
 
     except Exception:
-        LOG.exception("guest_save handler failed")
+        LOG.info("guest_save handler failed")
         try:
             await _reply(message, "Internal error while saving.")
         except Exception:
