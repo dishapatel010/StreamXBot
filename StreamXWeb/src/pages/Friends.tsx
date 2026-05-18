@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getFriends, getFriendRequests, sendFriendRequest, acceptFriendRequest, removeFriend, getFriendsListening } from '../services/friendsApi.js'
-import { getAuthUserInfo } from '../services/api.js'
 
 export const FriendsPage = () => {
-    const me = getAuthUserInfo()
     const [friends, setFriends] = useState<any[]>([])
     const [requests, setRequests] = useState<any[]>([])
     const [listening, setListening] = useState<any[]>([])
