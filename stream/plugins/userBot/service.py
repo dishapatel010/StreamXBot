@@ -171,9 +171,6 @@ async def userbot_ingest_forever(userbot: Client, log):
         await asyncio.sleep(poll)
 
 
-USERBOT_CLIENT: Client | None = None
-
-
 async def start_userbot(log):
     session_string = (getattr(Config, "SESSION_STRING", "") or "").strip()
     if not session_string:
@@ -194,19 +191,15 @@ async def start_userbot(log):
 
 
 async def start_userbot_service(log):
-    global USERBOT_CLIENT
     userbot = await start_userbot(log)
     if not userbot:
         return None, None
-    USERBOT_CLIENT = userbot
     await _warm_up_dialogs(userbot, log)
     task = asyncio.create_task(userbot_ingest_forever(userbot, log))
     return userbot, task
 
 
 async def stop_userbot_service(userbot: Client | None, task: asyncio.Task | None):
-    global USERBOT_CLIENT
-    USERBOT_CLIENT = None
     if task:
         task.cancel()
         try:

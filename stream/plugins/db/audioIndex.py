@@ -309,24 +309,7 @@ async def _enrich_audio_doc(message: Message, media):
     content_hash = None
     output = ""
     try:
-        try:
-            file_size = await download_message_media(message, file_path)
-        except Exception as err:
-            from pyrogram.errors import FileReferenceExpired
-            if isinstance(err, FileReferenceExpired) or "FILE_REFERENCE" in str(err):
-                LOG.info(f"File reference expired or invalid for msg {message.id} in chat {message.chat.id}. Refreshing message via Bot...")
-                from stream import bot
-                message = await bot.get_messages(chat_id=message.chat.id, message_ids=message.id)
-                media = message.audio
-                if not media and message.document and (message.document.mime_type or "").startswith("audio/"):
-                    media = message.document
-                if media:
-                    file_size = await download_message_media(message, file_path)
-                else:
-                    raise ValueError("No audio media found in refreshed message")
-            else:
-                raise err
-                
+        file_size = await download_message_media(message, file_path)
         try:
             content_hash = sha256_prefix_file(file_path)
         except Exception as e:
