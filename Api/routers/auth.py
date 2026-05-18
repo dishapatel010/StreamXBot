@@ -158,6 +158,14 @@ async def tg_login(
     if tg_user_id <= 0:
         raise HTTPException(status_code=401, detail="invalid telegram user")
 
+    col = db_handler.get_collection("users").collection
+    existing_user = await col.find_one({"_id": tg_user_id}, {"_id": 1})
+    if not existing_user:
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is currently locked. New accounts cannot be registered."
+        )
+
     now = time.time()
     updates: dict = {
         "first_name": tg.get("first_name"),
@@ -173,7 +181,7 @@ async def tg_login(
     if payload.username is not None:
         if not canon:
             raise HTTPException(status_code=400, detail="invalid username")
-        col = db_handler.get_collection("users").collection
+        # col = db_handler.get_collection("users").collection
         existing = await col.find_one({"username": canon, "_id": {"$ne": tg_user_id}}, {"_id": 1})
         if existing:
             raise HTTPException(status_code=409, detail="username already taken")
@@ -184,8 +192,8 @@ async def tg_login(
         updates["password"] = _hash_password(payload.password)
         updates["password_updated_at"] = now
 
-    col = db_handler.get_collection("users").collection
-    await col.update_one({"_id": tg_user_id}, {"$set": updates, "$setOnInsert": set_on_insert}, upsert=True)
+    # col = db_handler.get_collection("users").collection
+    await col.update_one({"_id": tg_user_id}, {"$set": updates, "$setOnInsert": set_on_insert}, upsert=False)
 
     token = create_auth_token(user_id=tg_user_id, first_name=tg.get("first_name"), profile_url=tg.get("photo_url"))
     if set_cookie:
@@ -342,64 +350,68 @@ async def update_fcm_token(payload: FCMTokenRequest, user_id: int = Depends(requ
 
 @router.post("/register")
 async def register_account(payload: RegisterRequest):
-    from stream import bot
-    if not bot:
-        raise HTTPException(status_code=500, detail="Bot is not running or ONLY_API is true")
-
-    canon = _canon_username(payload.username)
-    if not canon:
-        raise HTTPException(status_code=400, detail="invalid username")
-
-    col = db_handler.get_collection("users").collection
-    existing_user = await col.find_one({"_id": payload.userid})
-    if existing_user and existing_user.get("password"):
-        raise HTTPException(status_code=409, detail="User already registered")
-
-    existing_username = await col.find_one({"username": canon, "_id": {"$ne": payload.userid}}, {"_id": 1})
-    if existing_username:
-        raise HTTPException(status_code=409, detail="username already taken")
-
-    otp = str(random.randint(100000, 999999))
-    now = time.time()
-    otp_col = db_handler.get_collection("registration_otps").collection
-    tg_profile = await _get_telegram_profile(int(payload.userid))
-    
-    await otp_col.update_one(
-        {"_id": payload.userid},
-        {
-            "$set": {
-                "otp": otp,
-                "username": canon,
-                "password": _hash_password(payload.password),
-                "first_name": tg_profile.get("first_name"),
-                "telegram_username": tg_profile.get("telegram_username"),
-                "profile_url": tg_profile.get("profile_url"),
-                "photo_url": tg_profile.get("photo_url"),
-                "created_at": now
-            }
-        },
-        upsert=True
+    raise HTTPException(
+        status_code=403,
+        detail="Registration is currently locked. New accounts cannot be registered."
     )
-    
-    try:
-        await bot.send_message(
-            chat_id=payload.userid,
-            text=f"Your StreamX registration OTP is: `{otp}`\n\nThis OTP is valid for registration."
-        )
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Failed to send OTP to {payload.userid}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send OTP via Telegram bot. Have you started the bot?")
+    # from stream import bot
+    # if not bot:
+    #     raise HTTPException(status_code=500, detail="Bot is not running or ONLY_API is true")
 
-    return {
-        "ok": True,
-        "message": "OTP sent",
-        "user_id": int(payload.userid),
-        "username": canon,
-        "first_name": tg_profile.get("first_name"),
-        "profile_url": tg_profile.get("profile_url"),
-        "photo_url": tg_profile.get("photo_url"),
-    }
+    # canon = _canon_username(payload.username)
+    # if not canon:
+    #     raise HTTPException(status_code=400, detail="invalid username")
+
+    # col = db_handler.get_collection("users").collection
+    # existing_user = await col.find_one({"_id": payload.userid})
+    # if existing_user and existing_user.get("password"):
+    #     raise HTTPException(status_code=409, detail="User already registered")
+
+    # existing_username = await col.find_one({"username": canon, "_id": {"$ne": payload.userid}}, {"_id": 1})
+    # if existing_username:
+    #     raise HTTPException(status_code=409, detail="username already taken")
+
+    # otp = str(random.randint(100000, 999999))
+    # now = time.time()
+    # otp_col = db_handler.get_collection("registration_otps").collection
+    # tg_profile = await _get_telegram_profile(int(payload.userid))
+    
+    # await otp_col.update_one(
+    #     {"_id": payload.userid},
+    #     {
+    #         "$set": {
+    #             "otp": otp,
+    #             "username": canon,
+    #             "password": _hash_password(payload.password),
+    #             "first_name": tg_profile.get("first_name"),
+    #             "telegram_username": tg_profile.get("telegram_username"),
+    #             "profile_url": tg_profile.get("profile_url"),
+    #             "photo_url": tg_profile.get("photo_url"),
+    #             "created_at": now
+    #         }
+    #     },
+    #     upsert=True
+    # )
+    
+    # try:
+    #     await bot.send_message(
+    #         chat_id=payload.userid,
+    #         text=f"Your StreamX registration OTP is: `{otp}`\n\nThis OTP is valid for registration."
+    #     )
+    # except Exception as e:
+    #     import logging
+    #     logging.getLogger(__name__).error(f"Failed to send OTP to {payload.userid}: {e}")
+    #     raise HTTPException(status_code=500, detail="Failed to send OTP via Telegram bot. Have you started the bot?")
+
+    # return {
+    #     "ok": True,
+    #     "message": "OTP sent",
+    #     "user_id": int(payload.userid),
+    #     "username": canon,
+    #     "first_name": tg_profile.get("first_name"),
+    #     "profile_url": tg_profile.get("profile_url"),
+    #     "photo_url": tg_profile.get("photo_url"),
+    # }
 
 @router.post("/validate")
 async def validate_account(
@@ -407,63 +419,67 @@ async def validate_account(
     response: Response,
     set_cookie: bool = Query(default=False),
 ):
-    otp_col = db_handler.get_collection("registration_otps").collection
-    doc = await otp_col.find_one({"_id": payload.userid})
-    if not doc:
-        raise HTTPException(status_code=400, detail="No pending registration found")
-
-    if doc.get("otp") != payload.otp:
-        raise HTTPException(status_code=401, detail="Invalid OTP")
-
-    now = time.time()
-    col = db_handler.get_collection("users").collection
-    tg_profile = await _get_telegram_profile(int(payload.userid))
-    first_name = tg_profile.get("first_name") or (doc.get("first_name") if isinstance(doc.get("first_name"), str) else None)
-    telegram_username = tg_profile.get("telegram_username") or (
-        doc.get("telegram_username") if isinstance(doc.get("telegram_username"), str) else None
+    raise HTTPException(
+        status_code=403,
+        detail="Registration is currently locked. New accounts cannot be registered."
     )
-    profile_url = tg_profile.get("profile_url") or (doc.get("profile_url") if isinstance(doc.get("profile_url"), str) else None)
-    photo_url = tg_profile.get("photo_url") or (doc.get("photo_url") if isinstance(doc.get("photo_url"), str) else None)
-    if not profile_url:
-        profile_url = photo_url
-    if not photo_url:
-        photo_url = profile_url
+    # otp_col = db_handler.get_collection("registration_otps").collection
+    # doc = await otp_col.find_one({"_id": payload.userid})
+    # if not doc:
+    #     raise HTTPException(status_code=400, detail="No pending registration found")
 
-    updates = {
-        "username": doc["username"],
-        "password": doc["password"],
-        "first_name": first_name,
-        "photo_url": photo_url,
-        "profile_url": profile_url,
-        "profile_refreshed_at": now,
-        "username_updated_at": now,
-        "password_updated_at": now,
-        "updated_at": now,
-        "telegram.id": int(payload.userid),
-        "telegram.username": telegram_username,
-    }
-    set_on_insert = {
-        "created_at": now,
-    }
+    # if doc.get("otp") != payload.otp:
+    #     raise HTTPException(status_code=401, detail="Invalid OTP")
 
-    await col.update_one(
-        {"_id": payload.userid},
-        {"$set": updates, "$setOnInsert": set_on_insert},
-        upsert=True
-    )
+    # now = time.time()
+    # col = db_handler.get_collection("users").collection
+    # tg_profile = await _get_telegram_profile(int(payload.userid))
+    # first_name = tg_profile.get("first_name") or (doc.get("first_name") if isinstance(doc.get("first_name"), str) else None)
+    # telegram_username = tg_profile.get("telegram_username") or (
+    #     doc.get("telegram_username") if isinstance(doc.get("telegram_username"), str) else None
+    # )
+    # profile_url = tg_profile.get("profile_url") or (doc.get("profile_url") if isinstance(doc.get("profile_url"), str) else None)
+    # photo_url = tg_profile.get("photo_url") or (doc.get("photo_url") if isinstance(doc.get("photo_url"), str) else None)
+    # if not profile_url:
+    #     profile_url = photo_url
+    # if not photo_url:
+    #     photo_url = profile_url
 
-    await otp_col.delete_one({"_id": payload.userid})
+    # updates = {
+    #     "username": doc["username"],
+    #     "password": doc["password"],
+    #     "first_name": first_name,
+    #     "photo_url": photo_url,
+    #     "profile_url": profile_url,
+    #     "profile_refreshed_at": now,
+    #     "username_updated_at": now,
+    #     "password_updated_at": now,
+    #     "updated_at": now,
+    #     "telegram.id": int(payload.userid),
+    #     "telegram.username": telegram_username,
+    # }
+    # set_on_insert = {
+    #     "created_at": now,
+    # }
 
-    token = create_auth_token(user_id=payload.userid, first_name=first_name, profile_url=profile_url, photo_url=photo_url)
-    if set_cookie:
-        _set_auth_cookie(response=response, token=token)
+    # await col.update_one(
+    #     {"_id": payload.userid},
+    #     {"$set": updates, "$setOnInsert": set_on_insert},
+    #     upsert=True
+    # )
+
+    # await otp_col.delete_one({"_id": payload.userid})
+
+    # token = create_auth_token(user_id=payload.userid, first_name=first_name, profile_url=profile_url, photo_url=photo_url)
+    # if set_cookie:
+    #     _set_auth_cookie(response=response, token=token)
         
-    return {
-        "ok": True,
-        "user_id": int(payload.userid),
-        "username": doc.get("username"),
-        "token": token,
-        "first_name": first_name,
-        "profile_url": profile_url,
-        "photo_url": photo_url,
-    }
+    # return {
+    #     "ok": True,
+    #     "user_id": int(payload.userid),
+    #     "username": doc.get("username"),
+    #     "token": token,
+    #     "first_name": first_name,
+    #     "profile_url": profile_url,
+    #     "photo_url": photo_url,
+    # }
