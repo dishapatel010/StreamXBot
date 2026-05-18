@@ -104,47 +104,55 @@ async def cmd_status(_, message: Message):
     await message.reply_text(f"Guest-save settings:\n{str(s)}")
 
 
-async def _forward_to_channel(orig: Message, channel_id: int) -> Optional[Message]:
+async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[Message], Optional[str]]:
+    errs = []
     # 1. Try to forward first (preserves original author/message metadata)
     try:
         forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.chat.id, message_ids=orig.id)
         if isinstance(forwarded, list):
-            return forwarded[0] if forwarded else None
-        return forwarded
+            return (forwarded[0] if forwarded else None), None
+        return forwarded, None
     except Exception as e:
+        errs.append(f"Forward failed: {e}")
         LOG.debug("Forward failed, trying copy: %s", e)
 
     # 2. Try copy_message (copies the message without forward header)
     try:
         copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.id)
-        return copied
+        return copied, None
     except Exception as e:
+        errs.append(f"Copy failed: {e}")
         LOG.debug("Copy failed, trying to send by file_id: %s", e)
 
     # 3. Fallback: Send by file_id if we have the media file_id (crucial for Guest Mode!)
     try:
         if orig.audio:
-            return await bot.send_audio(
+            res = await bot.send_audio(
                 chat_id=channel_id,
                 audio=orig.audio.file_id,
                 caption=orig.caption
             )
+            return res, None
         elif orig.voice:
-            return await bot.send_voice(
+            res = await bot.send_voice(
                 chat_id=channel_id,
                 voice=orig.voice.file_id,
                 caption=orig.caption
             )
+            return res, None
         elif orig.document:
-            return await bot.send_document(
+            res = await bot.send_document(
                 chat_id=channel_id,
                 document=orig.document.file_id,
                 caption=orig.caption
             )
+            return res, None
     except Exception as e:
+        errs.append(f"Send by file_id failed: {e}")
         LOG.exception("Failed to send by file_id: %s", e)
     
-    return None
+    return None, "; ".join(errs)
+
 
 
 
@@ -183,9 +191,12 @@ async def handle_guest_save(_, message: Message):
             await _reply(message, "No channel configured. Owner can set with /guestsave_setchannel <id>")
             return
 
-        forwarded = await _forward_to_channel(orig, channel_id)
+        forwarded, err_msg = await _forward_to_channel(orig, channel_id)
         if not forwarded:
-            await _reply(message, "Failed to save file to archive (check bot permissions).")
+            error_text = "Failed to save file to archive (check bot permissions)."
+            if err_msg:
+                error_text += f"\nDetails: {err_msg}"
+            await _reply(message, error_text)
             return
 
         # store metadata in audio_collection if available
