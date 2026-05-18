@@ -8,6 +8,7 @@ export const FriendsPage = () => {
     const [requests, setRequests] = useState<any[]>([])
     const [listening, setListening] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
+    const [toId, setToId] = useState<string>('')
 
     useEffect(() => {
         let mounted = true
@@ -48,6 +49,13 @@ export const FriendsPage = () => {
                                 <li key={f._id}>{f.first_name || f.username} {f.presence?.online ? '(online)' : ''} <button onClick={() => handleRemove(f._id)}>Remove</button></li>
                             ))}</ul>
                         )}
+                    </section>
+
+                    <section>
+                        <h2>Add Friend</h2>
+                        <p>Send request by user id</p>
+                        <input value={toId} onChange={(e) => setToId(e.target.value)} placeholder="User id" />
+                        <button onClick={async () => { if (!toId) return; await handleSend(Number.parseInt(toId, 10)); setToId('') }}>Send Request</button>
                     </section>
 
                     <section>

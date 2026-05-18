@@ -20,7 +20,7 @@ class AuthEnforcer(BaseHTTPMiddleware):
             "/auth/cookie",
             "/webapp/verify",
         }
-        unauthenticated_prefixes = ("/assets", "/static")
+        unauthenticated_prefixes = ("/assets", "/static", "/share")
 
         if request.method == "OPTIONS":
             return await call_next(request)

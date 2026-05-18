@@ -399,20 +399,35 @@ async def jam_create(
 @router.get("/{jam_id}", response_model=JamJoinResponse)
 async def jam_get(
     jam_id: str,
-    user_id: int = Depends(require_user_id),
     authorization: str | None = Header(default=None),
     x_auth_token: str | None = Header(default=None, alias="X-Auth-Token"),
 ):
     doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
-    auth_payload = _auth_payload_from_headers(authorization, x_auth_token)
-    first_name, profile_url = await _resolve_member_meta(user_id=int(user_id), auth_payload=auth_payload)
-    await _ensure_member(jam_id=str(doc["_id"]), user_id=int(user_id), first_name=first_name, photo_url=profile_url)
-    doc2 = await _get_session(jam_id)
-    if not doc2:
-        raise HTTPException(status_code=404, detail="jam not found")
-    return {"ok": True, "jam": _serialize_session(doc2)}
+
+    # Try optional auth: if valid token provided, ensure membership. Otherwise return public view.
+    token = (authorization or "").strip()
+    if not token:
+        token = (x_auth_token or "").strip()
+
+    if token:
+        try:
+            payload = verify_auth_token(token)
+            uid = int(payload.get("uid") or payload.get("user_id") or 0)
+            if uid and uid > 0:
+                first_name, profile_url = await _resolve_member_meta(user_id=int(uid), auth_payload=payload)
+                await _ensure_member(jam_id=str(doc["_id"]), user_id=int(uid), first_name=first_name, photo_url=profile_url)
+                doc2 = await _get_session(jam_id)
+                if not doc2:
+                    raise HTTPException(status_code=404, detail="jam not found")
+                return {"ok": True, "jam": _serialize_session(doc2)}
+        except Exception:
+            # ignore invalid token for public view
+            pass
+
+    # Public unauthenticated view
+    return {"ok": True, "jam": _serialize_session(doc)}
 
 
 @router.post("/{jam_id}/join", response_model=JamJoinResponse)
