@@ -108,51 +108,51 @@ async def _forward_to_channel(orig: Message, channel_id: int) -> tuple[Optional[
     errs = []
     # 1. Try to forward first (preserves original author/message metadata)
     try:
-        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.chat.id, message_ids=orig.id)
+        forwarded = await bot.forward_messages(chat_id=channel_id, from_chat_id=orig.reply_to_message_id.chat.id, message_ids=orig.reply_to_message.id)
         if isinstance(forwarded, list):
             return (forwarded[0] if forwarded else None), None
         return forwarded, None
     except Exception as e:
         errs.append(f"Forward failed: {e}")
-        LOG.info("Forward failed, trying copy: %s", e)
+        LOG.info("Step 1 (Forward) failed: %s", e)
 
     # 2. Try copy_message (copies the message without forward header)
     try:
-        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.chat.id, message_id=orig.id)
+        copied = await bot.copy_message(chat_id=channel_id, from_chat_id=orig.reply_to_message_id.chat.id, message_id=orig.reply_to_message.id)
         return copied, None
     except Exception as e:
         errs.append(f"Copy failed: {e}")
-        LOG.info("Copy failed, trying to send by file_id: %s", e)
+        LOG.info("Step 2 (Copy) failed: %s", e)
 
     # 3. Fallback: Send by file_id if we have the media file_id (crucial for Guest Mode!)
     try:
-        if orig.audio:
+        LOG.info("Attempting Step 3 (Send by file_id) to channel %s...", channel_id)
+        if orig.reply_to_message.audio:
             res = await bot.send_audio(
                 chat_id=channel_id,
-                audio=orig.audio.file_id,
-                caption=orig.caption
+                audio=orig.reply_to_message.audio.file_id,
             )
+            LOG.info("Step 3 (Send Audio by file_id) succeeded!")
             return res, None
-        elif orig.voice:
+        elif orig.reply_to_message.voice:
             res = await bot.send_voice(
                 chat_id=channel_id,
-                voice=orig.voice.file_id,
-                caption=orig.caption
+                voice=orig.reply_to_message.voice.file_id
             )
+            LOG.info("Step 3 (Send Voice by file_id) succeeded!")
             return res, None
-        elif orig.document:
+        elif orig.reply_to_message.document:
             res = await bot.send_document(
                 chat_id=channel_id,
-                document=orig.document.file_id,
-                caption=orig.caption
+                document=orig.reply_to_message.document.file_id
             )
+            LOG.info("Step 3 (Send Document by file_id) succeeded!")
             return res, None
     except Exception as e:
         errs.append(f"Send by file_id failed: {e}")
-        LOG.info("Failed to send by file_id: %s", e)
+        LOG.info("Step 3 (Send by file_id) failed: %s", e)
     
     return None, "; ".join(errs)
-
 
 
 
@@ -171,9 +171,9 @@ async def handle_guest_save(_, message: Message):
             return
 
         # accept audio/voice/document with audio mime
-        is_audio = bool(orig.audio or orig.voice)
+        is_audio = bool(orig.reply_to_message.audio or orig.reply_to_message.voice)
         is_document_audio = False
-        if orig.document and getattr(orig.document, "mime_type", "") and orig.document.mime_type.startswith("audio/"):
+        if orig.reply_to_message.document and getattr(orig.reply_to_message.document, "mime_type", "") and orig.reply_to_message.document.mime_type.startswith("audio/"):
             is_document_audio = True
 
         if not (is_audio or is_document_audio):
@@ -203,8 +203,8 @@ async def handle_guest_save(_, message: Message):
         try:
             audio_col = db_handler.audio_collection.collection
             doc = {
-                "source_chat_id": int(orig.chat.id),
-                "source_message_id": int(orig.id),
+                "source_chat_id": int(orig.reply_to_message.chat.id),
+                "source_message_id": int(orig.reply_to_message.id),
                 "saved_chat_id": int(forwarded.chat.id),
                 "saved_message_id": int(forwarded.id),
                 "created_at": __import__('time').time(),
