@@ -18,6 +18,7 @@ class AuthEnforcer(BaseHTTPMiddleware):
             "/auth/register",
             "/auth/validate",
             "/auth/cookie",
+            "/webapp/verify",
         }
         unauthenticated_prefixes = ("/assets", "/static")
 
