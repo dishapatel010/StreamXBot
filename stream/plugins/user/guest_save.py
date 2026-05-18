@@ -191,31 +191,6 @@ async def handle_guest_save(_, message: Message):
             )
             return
 
-        # Save metadata
-        try:
-            audio_col = db_handler.audio_collection.collection
-
-            doc = {
-                "guest_message_id": int(message.id),
-                "source_chat_id": int(orig.chat.id),
-                "source_message_id": int(orig.id),
-                "saved_chat_id": int(sent.chat.id),
-                "saved_message_id": int(sent.id),
-                "file_id": (
-                    orig.audio.file_id
-                    if orig.audio
-                    else orig.voice.file_id
-                    if orig.voice
-                    else orig.document.file_id
-                ),
-                "created_at": __import__("time").time(),
-            }
-
-            await audio_col.insert_one(doc)
-
-        except Exception as e:
-            LOG.error("DB insert failed: %s", e)
-
         await _reply(message, "Saved to archive successfully!")
 
     except Exception as e:
