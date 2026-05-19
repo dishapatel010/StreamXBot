@@ -901,6 +901,54 @@ async def jam_ws(ws: WebSocket, jam_id: str):
                 doc3 = await _get_session(jam_id2)
                 if doc3:
                     await ws.send_json({"type": "jam_state", "jam": _serialize_session(doc3)})
+            elif mtype == "play":
+                col = db_handler.get_collection("jam_sessions").collection
+                doc = await _get_session(jam_id2)
+                if doc:
+                    if _has_permission(doc, int(user_id), action="play"):
+                        playback = doc.get("playback") if isinstance(doc.get("playback"), dict) else {}    
+                        pos, _ = _compute_position(playback)
+                        now = _now()
+                        updates = {
+                            "playback.position_sec": float(pos),
+                            "playback.started_at": now,
+                            "playback.is_playing": True,
+                            "updated_at": now,
+                        }
+                        updated_doc = await col.find_one_and_update(
+                            {"_id": jam_id2},
+                            {"$set": updates},
+                            return_document=ReturnDocument.AFTER,
+                        )
+                        if updated_doc:
+                            _JAM_CACHE[jam_id2] = updated_doc
+                        await _broadcast_fresh_state(jam_id2)
+                    else:
+                        await ws.send_json({"type": "error", "error": "forbidden"})
+            elif mtype == "pause":
+                col = db_handler.get_collection("jam_sessions").collection
+                doc = await _get_session(jam_id2)
+                if doc:
+                    if _has_permission(doc, int(user_id), action="pause"):
+                        playback = doc.get("playback") if isinstance(doc.get("playback"), dict) else {}    
+                        pos, _ = _compute_position(playback)
+                        now = _now()
+                        updates = {
+                            "playback.position_sec": float(pos),
+                            "playback.started_at": now,
+                            "playback.is_playing": False,
+                            "updated_at": now,
+                        }
+                        updated_doc = await col.find_one_and_update(
+                            {"_id": jam_id2},
+                            {"$set": updates},
+                            return_document=ReturnDocument.AFTER,
+                        )
+                        if updated_doc:
+                            _JAM_CACHE[jam_id2] = updated_doc
+                        await _broadcast_fresh_state(jam_id2)
+                    else:
+                        await ws.send_json({"type": "error", "error": "forbidden"})
             else:
                 await ws.send_json({"type": "error", "error": "unsupported_message"})
     except WebSocketDisconnect:
