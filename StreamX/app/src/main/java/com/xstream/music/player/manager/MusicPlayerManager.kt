@@ -510,7 +510,21 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
         if (song != null) {
             val id = jamId
             if (id != null) {
-                song.id?.let { enqueueJamTrack(it, playNext = true) }
+                val trackId = song.id
+                if (trackId != null) {
+                    songCache[trackId] = song
+                    val insertIndex = if (queue.isEmpty()) 0 else currentIndex + 1
+                    val newQueue = mutableListOf<Song>()
+                    queue.forEachIndexed { idx, s ->
+                        if (idx == currentIndex || s.id != trackId) {
+                            newQueue.add(s)
+                        }
+                    }
+                    newQueue.add(insertIndex.coerceAtMost(newQueue.size), song)
+                    queue.clear()
+                    queue.addAll(newQueue)
+                    enqueueJamTrack(trackId, playNext = true)
+                }
                 return
             }
 
@@ -572,6 +586,27 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
 
         val id = jamId
         if (id != null) {
+            val songsToPromote = songs.filter { it.id != null }
+            if (songsToPromote.isNotEmpty()) {
+                val insertIndex = if (queue.isEmpty()) 0 else currentIndex + 1
+                val promotedIds = songsToPromote.map { it.id }.toSet()
+
+                songsToPromote.forEach { song ->
+                    song.id?.let { songCache[it] = song }
+                }
+
+                val newQueue = mutableListOf<Song>()
+                queue.forEachIndexed { idx, s ->
+                    if (idx == currentIndex || !promotedIds.contains(s.id)) {
+                        newQueue.add(s)
+                    }
+                }
+                newQueue.addAll(insertIndex, songsToPromote)
+
+                queue.clear()
+                queue.addAll(newQueue)
+            }
+
             enqueueJamTracks(songs, playNext = true)
             return
         }
@@ -788,12 +823,28 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
         }
     }
 
-    fun togglePlayPause(isHost: Boolean = false) {
+    fun togglePlayPause(isHost: Boolean = this.isHost) {
         val id = jamId
         if (id != null) {
             if (isHost) {
+                val targetPlaying = !isPlaying.value
+                suppressJamMediaCommands()
+                if (targetPlaying) {
+                    isLocallyPaused = false
+                    player.playWhenReady = true
+                    if (player.playbackState == Player.STATE_IDLE) {
+                        player.prepare()
+                    }
+                    player.play()
+                    isPlaying.value = true
+                } else {
+                    player.pause()
+                    isPlaying.value = false
+                }
+                lastSyncedIsPlaying = targetPlaying
+
                 viewModelScope.launch(Dispatchers.IO) {
-                    if (isPlaying.value) {
+                    if (!targetPlaying) {
                         dispatchJamTransportCommand("pause")
                     } else {
                         dispatchJamTransportCommand("play")
@@ -827,10 +878,22 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
     fun seekTo(positionMs: Long) {
         val id = jamId
         if (id != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                val apiBaseUrl = ApiPreferences.getApiUrl(context)
-                val token = AuthPreferences.getUser(context)?.token
-                jamSeek(apiBaseUrl, id, positionMs / 1000.0, context, token)
+            if (isHost) {
+                player.seekTo(positionMs)
+                currentPosition.value = positionMs
+                lastSyncedPositionSec = positionMs / 1000.0
+                lastJamSyncReceivedAtMs = System.currentTimeMillis()
+                viewModelScope.launch(Dispatchers.IO) {
+                    val apiBaseUrl = ApiPreferences.getApiUrl(context)
+                    val token = AuthPreferences.getUser(context)?.token
+                    jamSeek(apiBaseUrl, id, positionMs / 1000.0, context, token)
+                }
+            } else {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val apiBaseUrl = ApiPreferences.getApiUrl(context)
+                    val token = AuthPreferences.getUser(context)?.token
+                    jamSeek(apiBaseUrl, id, positionMs / 1000.0, context, token)
+                }
             }
             return
         }
@@ -872,10 +935,26 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
     }
     
     fun addToQueue(song: Song) {
+        val id = jamId
+        if (id != null) {
+            val trackId = song.id
+            if (!trackId.isNullOrBlank()) {
+                songCache[trackId] = song
+                if (queue.none { it.id == trackId }) {
+                    queue.add(song)
+                }
+                addToJamQueue(trackId)
+            }
+            return
+        }
         queue.add(song)
     }
 
     fun addToJamQueue(trackId: String) {
+        val song = songCache[trackId]
+        if (song != null && queue.none { it.id == trackId }) {
+            queue.add(song)
+        }
         enqueueJamTrack(trackId, playNext = false)
     }
 
@@ -937,13 +1016,28 @@ class MusicPlayerManager(private val context: Context) : ViewModel() {
         if (playerCommand != Player.COMMAND_PLAY_PAUSE || isJamMediaCommandSuppressed()) return
 
         if (isHost) {
-            val jamIsPlaying = JamWebSocketManager.jamState.value?.playback?.isPlaying ?: lastSyncedIsPlaying
+            val targetPlaying = !player.playWhenReady
             suppressJamMediaCommands()
+            
+            if (targetPlaying) {
+                isLocallyPaused = false
+                player.playWhenReady = true
+                if (player.playbackState == Player.STATE_IDLE) {
+                    player.prepare()
+                }
+                player.play()
+                isPlaying.value = true
+            } else {
+                player.pause()
+                isPlaying.value = false
+            }
+            lastSyncedIsPlaying = targetPlaying
+
             viewModelScope.launch(Dispatchers.IO) {
-                if (jamIsPlaying) {
-                    dispatchJamTransportCommand("pause", jamIdOverride = id)
-                } else {
+                if (targetPlaying) {
                     dispatchJamTransportCommand("play", jamIdOverride = id)
+                } else {
+                    dispatchJamTransportCommand("pause", jamIdOverride = id)
                 }
             }
         } else {

@@ -2053,24 +2053,9 @@ fun MusicScreen(
                                 userState = userState.value,
                                 isPlaying = playerManager.isPlaying.value,
                                 onPlayPause = {
-                                    scope.launch {
-                                        
-                                        
-                                        val jamState = JamWebSocketManager.jamState.value
-                                        val isHost = jamState?.hostUserId == userState.value?.id
-                                        
-                                        if (isHost) {
-                                            val token = userState.value?.token
-                                            if (playerManager.isPlaying.value) {
-                                                jamPause(apiUrlState.value, jamId, context, token)
-                                            } else {
-                                                jamPlay(apiUrlState.value, jamId, context, token)
-                                            }
-                                        } else {
-                                            
-                                            playerManager.toggleLocalPlayPause()
-                                        }
-                                    }
+                                    val jamState = JamWebSocketManager.jamState.value
+                                    val isHost = jamState?.hostUserId == userState.value?.id
+                                    playerManager.togglePlayPause(isHost)
                                 },
                                 friends = friendsState.value,
                                 onInviteFriend = { friendId ->
@@ -2771,21 +2756,9 @@ private fun BoxScope.MiniPlayerHost(
             isLoading = isLoading,
             isJam = true,
             onPlayPauseClick = {
-                scope.launch {
-                    val activeJamId = jamId ?: return@launch
-                    val jamState = JamWebSocketManager.jamState.value
-                    val isHost = jamState?.hostUserId == currentUserId
-
-                    if (isHost) {
-                        if (isPlaying) {
-                            jamPause(apiBaseUrl, activeJamId, context, userToken)
-                        } else {
-                            jamPlay(apiBaseUrl, activeJamId, context, userToken)
-                        }
-                    } else {
-                        playerManager.toggleLocalPlayPause()
-                    }
-                }
+                val jamState = JamWebSocketManager.jamState.value
+                val isHost = jamState?.hostUserId == currentUserId
+                playerManager.togglePlayPause(isHost)
             },
             onPlayerClick = onJamPlayerClick,
             onPlayerLongClick = onStopPlayer,
