@@ -59,7 +59,10 @@ class Config:
     MULTI_CLIENTS_3 = ""
     MULTI_CLIENTS_4 = ""
     MULTI_CLIENT_TOKENS: list[str] = []
-    COOKIES_DIR = "cookies/"  
+    COOKIES_DIR = "cookies/"
+    BOT_WORKERS = 0
+    BOT_MAX_CONCURRENT_TRANSMISSIONS = 0
+    MAX_STREAM_BUFFER_BYTES = 20_000_000
 
 
     @classmethod
@@ -327,6 +330,22 @@ class Config:
     @classmethod
     def get(cls, key):
         return getattr(cls, key, None)
+
+    @classmethod
+    def get_bot_workers(cls) -> int:
+        val = getattr(cls, "BOT_WORKERS", 0)
+        if val > 0:
+            return int(val)
+        import os
+        return min(32, (os.cpu_count() or 4) + 4)
+
+    @classmethod
+    def get_bot_max_concurrent_transmissions(cls) -> int:
+        val = getattr(cls, "BOT_MAX_CONCURRENT_TRANSMISSIONS", 0)
+        if val > 0:
+            return int(val)
+        import os
+        return min(32, (os.cpu_count() or 4) + 4)
 
     @classmethod
     def get_all_config(cls) -> dict:

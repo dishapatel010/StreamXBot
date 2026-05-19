@@ -1,0 +1,80 @@
+# /etc/nginx/sites-available/streamx.nexiuo.app
+# HTTP -> HTTPS redirect
+server {
+    if ($host = streamx.nexiuo.app) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name streamx.nexiuo.app;
+
+    return 301 https://$host$request_uri;
+
+
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name streamx.nexiuo.app;
+
+    # SSL certs
+    ssl_certificate /etc/letsencrypt/live/streamx.nexiuo.app/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/streamx.nexiuo.app/privkey.pem; # managed by Certbot
+
+    # Strong TLS only
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
+
+    # Hide nginx version
+    server_tokens off;
+
+    # Block hidden files
+    location ~ /\. {
+        deny all;
+    }
+
+    # Block sensitive files
+    location ~* \.(env|log|ini|conf|sh|sql|bak)$ {
+        deny all;
+    }
+
+    # Limit upload size
+    client_max_body_size 10M;
+
+    # Timeouts
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+
+    # Main API proxy
+    location / {
+
+        proxy_pass http://127.0.0.1:8001;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Websocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Performance and streaming optimizations
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+}

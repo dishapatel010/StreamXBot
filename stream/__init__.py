@@ -38,7 +38,8 @@ if not _only_api:
         api_hash=Config.API_HASH,
         bot_token=Config.BOT_TOKEN,
         plugins=dict(root="stream.plugins"),
-        workers=8,
+        workers=Config.get_bot_workers(),
+        max_concurrent_transmissions=Config.get_bot_max_concurrent_transmissions(),
         parse_mode=enums.ParseMode.MARKDOWN,
         in_memory=False,
     )
@@ -388,7 +389,8 @@ async def initialize_multi_clients(log=None, primary_user_id: int | None = None)
                 api_hash=str(Config.API_HASH),
                 bot_token=bot_token,
                 session_string=session_string,
-                workers=4,
+                workers=12,
+                max_concurrent_transmissions=12,
                 in_memory=True,
                 no_updates=True,
             )
@@ -547,3 +549,13 @@ async def release_stream_client(client_id: int) -> None:
             return
         v = int(work_loads.get(client_id) or 0) - 1
         work_loads[client_id] = v if v > 0 else 0
+
+
+async def acquire_stream_client_by_id(client_id: int) -> tuple[int, Client]:
+    if bool(getattr(Config, "ONLY_API", False)) or bot is None:
+        raise RuntimeError("Streaming clients are disabled (ONLY_API=true)")
+    async with _multi_lock:
+        if client_id not in multi_clients:
+            raise RuntimeError(f"Client {client_id} not available")
+        work_loads[client_id] = int(work_loads.get(client_id) or 0) + 1
+        return client_id, multi_clients[client_id]

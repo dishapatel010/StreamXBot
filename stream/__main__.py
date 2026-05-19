@@ -1,5 +1,14 @@
 import os
 import asyncio
+import socket
+
+# Force socket to resolve using IPv4 only *only* for telegraph domains due to IPv6 connection issues
+_orig_getaddrinfo = socket.getaddrinfo
+def _getaddrinfo_ipv4(host=None, port=None, family=0, type=0, proto=0, flags=0):
+    if host and isinstance(host, str) and any(d in host for d in ("telegra.ph", "graph.org")):
+        family = socket.AF_INET
+    return _orig_getaddrinfo(host, port, family, type, proto, flags)
+socket.getaddrinfo = _getaddrinfo_ipv4
 
 if os.name != "nt":
     try:
@@ -29,9 +38,9 @@ def get_api_port() -> int:
         except ValueError:
             pass
     try:
-        return int(getattr(Config, "API_PORT", 8000))
+        return int(getattr(Config, "API_PORT", 8001))
     except Exception:
-        return 8000
+        return 8001
 
 
 async def start_api(log):
