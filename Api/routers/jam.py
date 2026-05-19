@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from Api.services.stream_service import warm_track_cached
 from Api.utils.auth import require_user_id, verify_auth_token
 from stream.database.MongoDb import db_handler
+from pymongo import ReturnDocument
 from stream.helpers.logger import LOGGER
 
 LOG = LOGGER(__name__)
@@ -144,12 +145,83 @@ async def _warm_tracks(track_ids: list[str]) -> None:
             pass
 
 
+import threading
+
+class TTLSizeBoundedCache:
+    def __init__(self, maxsize: int = 1000, ttl: float = 300.0):
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self.cache: dict[str, tuple[dict, float]] = {}
+        self.lock = threading.Lock()
+
+    def get(self, key: str, default=None) -> dict | None:
+        with self.lock:
+            if key not in self.cache:
+                return default
+            val, expiry = self.cache[key]
+            if time.monotonic() > expiry:
+                self.cache.pop(key, None)
+                return default
+            return val
+
+    def set(self, key: str, value: dict) -> None:
+        with self.lock:
+            now = time.monotonic()
+            expired = [k for k, (_, exp) in self.cache.items() if now > exp]
+            for k in expired:
+                self.cache.pop(k, None)
+            
+            if len(self.cache) >= self.maxsize:
+                if self.cache:
+                    oldest_key = min(self.cache.keys(), key=lambda k: self.cache[k][1])
+                    self.cache.pop(oldest_key, None)
+            
+            self.cache[key] = (value, now + self.ttl)
+
+    def pop(self, key: str, default=None) -> dict | None:
+        with self.lock:
+            if key in self.cache:
+                val, _ = self.cache.pop(key)
+                return val
+            return default
+
+    def __contains__(self, key: str) -> bool:
+        with self.lock:
+            if key not in self.cache:
+                return False
+            val, expiry = self.cache[key]
+            if time.monotonic() > expiry:
+                self.cache.pop(key, None)
+                return False
+            return True
+
+    def __getitem__(self, key: str) -> dict:
+        with self.lock:
+            if key not in self.cache:
+                raise KeyError(key)
+            val, expiry = self.cache[key]
+            if time.monotonic() > expiry:
+                self.cache.pop(key, None)
+                raise KeyError(key)
+            return val
+
+    def __setitem__(self, key: str, value: dict) -> None:
+        self.set(key, value)
+
+
+_JAM_CACHE = TTLSizeBoundedCache(maxsize=500, ttl=300.0)
+
+
 async def _get_session(jam_id: str) -> dict | None:
     jam_id = (jam_id or "").strip()
     if not jam_id:
         return None
+    if jam_id in _JAM_CACHE:
+        return _JAM_CACHE[jam_id]
     col = db_handler.get_collection("jam_sessions").collection
     doc = await col.find_one({"_id": jam_id})
+    if doc:
+        _JAM_CACHE[jam_id] = doc
     return doc
 
 
@@ -229,11 +301,14 @@ async def _broadcast(jam_id: str, payload: dict) -> None:
     if not conns:
         return
     dead: list[WebSocket] = []
-    for ws in conns:
+    
+    async def send_one(ws: WebSocket):
         try:
             await ws.send_json(payload)
         except Exception:
             dead.append(ws)
+
+    await asyncio.gather(*(send_one(ws) for ws in conns))
     if dead:
         async with _WS_LOCK:
             room = _WS_ROOMS.get(jam_id)
@@ -262,7 +337,9 @@ def _ws_user_id(ws: WebSocket) -> int:
 
 async def _ensure_member(*, jam_id: str, user_id: int, first_name: str | None = None, photo_url: str | None = None) -> None:
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id}, {"members": 1, "host_user_id": 1})
+    doc = _JAM_CACHE.get(jam_id)
+    if not doc:
+        doc = await col.find_one({"_id": jam_id})
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     members = doc.get("members") if isinstance(doc.get("members"), list) else []
@@ -287,17 +364,29 @@ async def _ensure_member(*, jam_id: str, user_id: int, first_name: str | None = 
             update_doc: dict[str, object] = {"$set": updates}
             if pu and "photo_url" in m:
                 update_doc["$unset"] = {"members.$.photo_url": ""}
-            await col.update_one(
+            res = await col.find_one_and_update(
                 {"_id": jam_id, "members.user_id": {"$in": [int(user_id), str(int(user_id))]}},
                 update_doc,
+                return_document=ReturnDocument.AFTER,
             )
+            if res:
+                _JAM_CACHE[jam_id] = res
+        else:
+            if jam_id not in _JAM_CACHE:
+                _JAM_CACHE[jam_id] = doc
         return
     member: dict[str, object] = {"user_id": int(user_id), "role": role}
     if fn:
         member["first_name"] = fn
     if pu:
         member["profile_url"] = pu
-    await col.update_one({"_id": jam_id}, {"$push": {"members": member}, "$set": {"updated_at": _now()}})
+    res = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$push": {"members": member}, "$set": {"updated_at": _now()}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if res:
+        _JAM_CACHE[jam_id] = res
 
 
 def _has_permission(doc: dict, user_id: int, *, action: str) -> bool:
@@ -453,7 +542,7 @@ async def jam_join(
 @router.post("/{jam_id}/leave")
 async def jam_leave(jam_id: str, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
 
@@ -468,12 +557,19 @@ async def jam_leave(jam_id: str, user_id: int = Depends(require_user_id)):
 
     host_id = _as_int(doc.get("host_user_id")) or 0
     if int(user_id) != int(host_id):
-        await col.update_one({"_id": jam_id}, {"$set": {"members": kept, "updated_at": _now()}})
+        updated_doc = await col.find_one_and_update(
+            {"_id": jam_id},
+            {"$set": {"members": kept, "updated_at": _now()}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if updated_doc:
+            _JAM_CACHE[jam_id] = updated_doc
         await _broadcast_fresh_state(jam_id)
         return {"ok": True}
 
     if not kept:
         await col.delete_one({"_id": jam_id})
+        _JAM_CACHE.pop(jam_id, None)
         await _broadcast(jam_id, {"type": "jam_ended", "jam_id": jam_id})
         return {"ok": True, "ended": True}
 
@@ -486,13 +582,14 @@ async def jam_leave(jam_id: str, user_id: int = Depends(require_user_id)):
         elif m.get("role") == "host":
             m["role"] = "listener"
 
-    await col.update_one(
+    updated_doc = await col.find_one_and_update(
         {"_id": jam_id},
         {"$set": {"host_user_id": int(new_host), "members": kept, "updated_at": _now()}},
+        return_document=ReturnDocument.AFTER,
     )
-    doc3 = await col.find_one({"_id": jam_id})
-    if doc3:
-        await _broadcast_fresh_state(jam_id)
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
+    await _broadcast_fresh_state(jam_id)
     return {"ok": True, "new_host_user_id": int(new_host)}
 
 
@@ -503,7 +600,7 @@ async def jam_settings_update(
     user_id: int = Depends(require_user_id),
 ):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id}, {"host_user_id": 1, "settings": 1})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if int(user_id) != int(_as_int(doc.get("host_user_id")) or 0):
@@ -518,7 +615,13 @@ async def jam_settings_update(
         raise HTTPException(status_code=400, detail="no settings to update")
     updates["updated_at"] = _now()
 
-    await col.update_one({"_id": jam_id}, {"$set": updates})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": updates},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     await _broadcast_fresh_state(jam_id)
     return {"ok": True}
 
@@ -526,7 +629,7 @@ async def jam_settings_update(
 @router.post("/{jam_id}/play")
 async def jam_play(jam_id: str, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="play"):
@@ -541,7 +644,13 @@ async def jam_play(jam_id: str, user_id: int = Depends(require_user_id)):
         "playback.is_playing": True,
         "updated_at": now,
     }
-    await col.update_one({"_id": jam_id}, {"$set": updates})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": updates},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     await _broadcast_fresh_state(jam_id)
     return {"ok": True}
 
@@ -549,7 +658,7 @@ async def jam_play(jam_id: str, user_id: int = Depends(require_user_id)):
 @router.post("/{jam_id}/pause")
 async def jam_pause(jam_id: str, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="pause"):
@@ -564,7 +673,13 @@ async def jam_pause(jam_id: str, user_id: int = Depends(require_user_id)):
         "playback.is_playing": False,
         "updated_at": now,
     }
-    await col.update_one({"_id": jam_id}, {"$set": updates})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": updates},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     await _broadcast_fresh_state(jam_id)
     return {"ok": True}
 
@@ -572,7 +687,7 @@ async def jam_pause(jam_id: str, user_id: int = Depends(require_user_id)):
 @router.post("/{jam_id}/seek")
 async def jam_seek(jam_id: str, payload: JamSeekRequest, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="seek"):
@@ -589,7 +704,13 @@ async def jam_seek(jam_id: str, payload: JamSeekRequest, user_id: int = Depends(
         "playback.is_playing": bool(is_playing),
         "updated_at": now,
     }
-    await col.update_one({"_id": jam_id}, {"$set": updates})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": updates},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     await _broadcast_fresh_state(jam_id)
     return {"ok": True}
 
@@ -599,7 +720,7 @@ async def jam_queue_add(jam_id: str, payload: JamQueueAddRequest, user_id: int =
     if not track_id:
         raise HTTPException(status_code=400, detail="track_id is required")
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="queue"):
@@ -620,10 +741,15 @@ async def jam_queue_add(jam_id: str, payload: JamQueueAddRequest, user_id: int =
     curr_pos, _ = _compute_position(playback)
     LOG.info(f"[jam_queue_add] jam_id={jam_id} track_id={track_id} pos={curr_pos:.2f} queue_len={len(q2)}")
     
-    await col.update_one({"_id": jam_id}, {"$set": {"queue": q2, "updated_at": now}})
-    doc2 = await col.find_one({"_id": jam_id})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": {"queue": q2, "updated_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     try:
-        pb = (doc2 or doc).get("playback") if isinstance((doc2 or doc).get("playback"), dict) else {}
+        pb = (updated_doc or doc).get("playback") if isinstance((updated_doc or doc).get("playback"), dict) else {}
         current = _sanitize_track_id(pb.get("track_id"))
         asyncio.create_task(_warm_tracks([current] + q2[:2]))
     except Exception:
@@ -635,7 +761,7 @@ async def jam_queue_add(jam_id: str, payload: JamQueueAddRequest, user_id: int =
 @router.post("/{jam_id}/queue/reorder")
 async def jam_queue_reorder(jam_id: str, payload: JamQueueReorderRequest, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="queue"):
@@ -643,10 +769,15 @@ async def jam_queue_reorder(jam_id: str, payload: JamQueueReorderRequest, user_i
 
     queue = [_sanitize_track_id(x) for x in (payload.queue or []) if _sanitize_track_id(x)]
     now = _now()
-    await col.update_one({"_id": jam_id}, {"$set": {"queue": queue, "updated_at": now}})
-    doc2 = await col.find_one({"_id": jam_id})
+    updated_doc = await col.find_one_and_update(
+        {"_id": jam_id},
+        {"$set": {"queue": queue, "updated_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     try:
-        pb = (doc2 or doc).get("playback") if isinstance((doc2 or doc).get("playback"), dict) else {}
+        pb = (updated_doc or doc).get("playback") if isinstance((updated_doc or doc).get("playback"), dict) else {}
         current = _sanitize_track_id(pb.get("track_id"))
         asyncio.create_task(_warm_tracks([current] + queue[:2]))
     except Exception:
@@ -658,7 +789,7 @@ async def jam_queue_reorder(jam_id: str, payload: JamQueueReorderRequest, user_i
 @router.post("/{jam_id}/next")
 async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
     col = db_handler.get_collection("jam_sessions").collection
-    doc = await col.find_one({"_id": jam_id})
+    doc = await _get_session(jam_id)
     if not doc:
         raise HTTPException(status_code=404, detail="jam not found")
     if not _has_permission(doc, int(user_id), action="next"):
@@ -669,7 +800,7 @@ async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
     
     now = _now()
     if not q2:
-        await col.update_one(
+        updated_doc = await col.find_one_and_update(
             {"_id": jam_id},
             {
                 "$set": {
@@ -677,13 +808,16 @@ async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
                     "updated_at": now,
                 }
             },
+            return_document=ReturnDocument.AFTER,
         )
+        if updated_doc:
+            _JAM_CACHE[jam_id] = updated_doc
         await _broadcast_fresh_state(jam_id)
         return {"ok": True, "track_id": None}
 
     next_track = _sanitize_track_id(q2.pop(0))
     if not next_track:
-        await col.update_one(
+        updated_doc = await col.find_one_and_update(
             {"_id": jam_id},
             {
                 "$set": {
@@ -691,7 +825,10 @@ async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
                     "updated_at": now,
                 }
             },
+            return_document=ReturnDocument.AFTER,
         )
+        if updated_doc:
+            _JAM_CACHE[jam_id] = updated_doc
         await _broadcast_fresh_state(jam_id)
         return {"ok": True, "track_id": None}
 
@@ -701,7 +838,7 @@ async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
     if track_doc and isinstance(track_doc.get("audio"), dict):
         duration = track_doc["audio"].get("duration_sec")
 
-    await col.update_one(
+    updated_doc = await col.find_one_and_update(
         {"_id": jam_id},
         {
             "$set": {
@@ -714,8 +851,10 @@ async def jam_next(jam_id: str, user_id: int = Depends(require_user_id)):
                 "updated_at": now,
             }
         },
+        return_document=ReturnDocument.AFTER,
     )
-    doc2 = await col.find_one({"_id": jam_id})
+    if updated_doc:
+        _JAM_CACHE[jam_id] = updated_doc
     try:
         asyncio.create_task(_warm_tracks([next_track] + q2[:2]))
     except Exception:

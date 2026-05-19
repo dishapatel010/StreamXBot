@@ -182,7 +182,8 @@ async def start_userbot(log):
         api_hash=str(Config.API_HASH),
         session_string=session_string,
         in_memory=False,
-        workers=4,
+        workers=12,
+        max_concurrent_transmissions=12,
     )
     await userbot.start()
     me = await userbot.get_me()

@@ -8,10 +8,7 @@ services:
 
     command: ["bash", "/app/start.sh"]
 
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=1
-
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8001"
 
     restart: unless-stopped

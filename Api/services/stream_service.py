@@ -19,7 +19,6 @@ from stream.helpers.logger import LOGGER
 from stream.database.MongoDb import db_handler
 
 _CHUNK_SIZE = 1024 * 1024
-_MAX_STREAM_BUFFER_BYTES = 25_000_000
 _STREAM_HUBS: dict[str, "_StreamHub"] = {}
 _STREAM_HUBS_LOCK = asyncio.Lock()
 _FILE_ID_LOCKS: dict[str, asyncio.Lock] = {}
@@ -200,12 +199,13 @@ class _StreamHub:
                 continue
             break
 
+        max_buf = int(getattr(Config, "MAX_STREAM_BUFFER_BYTES", 20_000_000))
         buffer_start = self._buffer_start()
         buffer_bytes = self._total_written - buffer_start
-        if buffer_bytes <= _MAX_STREAM_BUFFER_BYTES:
+        if buffer_bytes <= max_buf:
             return
 
-        keep_from = self._total_written - _MAX_STREAM_BUFFER_BYTES
+        keep_from = self._total_written - max_buf
         while self._chunks:
             start, data = self._chunks[0]
             end = start + len(data)
@@ -1375,10 +1375,18 @@ async def warm_track_cached(track_id: str) -> dict:
     # Instead of starting a Hub (which starts a producer task and consumes a client),
     # we just ensure the file_id is resolved and cached for the primary client.
     # This makes the eventual stream start much faster without 'Streaming started' noise.
-    from stream import acquire_stream_client, release_stream_client
+    from stream import get_primary_client_user_id, acquire_stream_client_by_id, acquire_stream_client, release_stream_client
     
     # We only warm for the primary client to avoid exhausting others.
-    client_id, client = await acquire_stream_client()
+    p_id = get_primary_client_user_id()
+    if p_id is not None:
+        try:
+            client_id, client = await acquire_stream_client_by_id(int(p_id))
+        except Exception:
+            client_id, client = await acquire_stream_client()
+    else:
+        client_id, client = await acquire_stream_client()
+
     try:
         await _ensure_client_file_id(
             track_id=track_id,
